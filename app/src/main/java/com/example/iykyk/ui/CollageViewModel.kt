@@ -13,11 +13,13 @@ import com.example.iykyk.domain.model.ProcessingStage
 import com.example.iykyk.domain.model.UniquePerson
 import com.example.iykyk.ui.export.CollageBitmapRenderer
 import com.example.iykyk.ui.export.CollageExportManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class CollageUiState(
     val selectedVideoUri: Uri? = null,
@@ -64,10 +66,13 @@ class CollageViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
-            val pipeline = VideoProcessingPipeline(getApplication())
-            currentPipeline = pipeline
+            try {
+                val pipeline = withContext(Dispatchers.IO) {
+                    VideoProcessingPipeline(getApplication())
+                }
+                currentPipeline = pipeline
 
-            pipeline.processVideo(uri).collect { state ->
+                pipeline.processVideo(uri).collect { state ->
                 when (state) {
                     is PipelineState.Progress -> {
                         _uiState.update {
@@ -101,6 +106,15 @@ class CollageViewModel(application: Application) : AndroidViewModel(application)
                             )
                         }
                     }
+                }
+            }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isProcessing = false,
+                        errorMessage = e.localizedMessage ?: "Processing failed",
+                        progress = PipelineProgress(stage = ProcessingStage.ERROR, progress = 0f)
+                    )
                 }
             }
         }
