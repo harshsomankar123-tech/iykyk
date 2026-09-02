@@ -2,8 +2,6 @@
 
 An on-device Android application (**Kotlin + Jetpack Compose**) that processes portrait video clips, detects faces and landmarks using **Google ML Kit**, generates normalized identity embeddings using an embedded **MobileFaceNet TFLite** model, clusters faces to isolate unique individuals and continuous appearance segments, selects the best representative high-quality shot for each person, and composes an aesthetic, shareable Instagram-Story / Bento-Grid style collage.
 
----
-
 ## Architecture & Pipeline Flow
 
 ```mermaid
@@ -22,8 +20,6 @@ flowchart TD
     AppearanceSegmenter --> CollageComposer
     CollageComposer --> ExportShare[Stage 7: Render Bitmap & Android ShareSheet]
 ```
-
----
 
 ## Core Pipeline Stages & Mathematical Formulations
 
@@ -76,14 +72,10 @@ $$\text{Score} = w_{\text{sharp}} \cdot S_{\text{sharp}} + w_{\text{front}} \cdo
 - **Permissionless System Picker**: Uses `ActivityResultContracts.PickVisualMedia()` for zero-storage-permission privacy.
 - **Instagram Story Collage**: Generates $1080 \times 1920$ Story layout with adaptive bento grids, customizable title, appearance badges, and direct Android ShareSheet integration.
 
----
-
 ## Unit Testing
 
 - [`IdentityClusteringEngineTest.kt`](app/src/test/java/com/example/iykyk/IdentityClusteringEngineTest.kt): Unit tests cosine similarity, distance metrics, IoU calculations, and validates that agglomerative clustering math and appearance segment algorithms correctly partition synthetic multi-appearance test sequences.
 - [`BestShotSelectorTest.kt`](app/src/test/java/com/example/iykyk/BestShotSelectorTest.kt): Unit tests frontality scoring, boundary clipping penalties, and verifies that the composite quality heuristic selects sharp, smiling, front-facing frames over blurry frames.
-
----
 
 ## Build & Run Requirements
 
