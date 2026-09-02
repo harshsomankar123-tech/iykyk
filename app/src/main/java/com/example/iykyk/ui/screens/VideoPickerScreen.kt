@@ -2,6 +2,7 @@ package com.example.iykyk.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -63,7 +64,7 @@ fun VideoPickerScreen(
     onViewResults: () -> Unit
 ) {
     val videoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         uri?.let { onVideoSelected(it) }
     }
@@ -103,7 +104,7 @@ fun VideoPickerScreen(
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // Minimalist Video Picker Card
+            // Minimalist Video Picker Card (Uses Privacy-Preserving System Photo/Video Picker)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -114,7 +115,9 @@ fun VideoPickerScreen(
                         shape = RoundedCornerShape(16.dp)
                     )
                     .clickable(enabled = !uiState.isProcessing) {
-                        videoPickerLauncher.launch("video/*")
+                        videoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                        )
                     },
                 colors = CardDefaults.cardColors(containerColor = DarkSurface)
             ) {
