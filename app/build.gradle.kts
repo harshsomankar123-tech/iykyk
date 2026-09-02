@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.iykyk"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -42,6 +42,9 @@ android {
     }
     aaptOptions {
         noCompress("tflite")
+    }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
     packaging {
         resources {
@@ -76,9 +79,10 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 
-    // Kotlin Coroutines
+    // Kotlin Coroutines & Play Services Await
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

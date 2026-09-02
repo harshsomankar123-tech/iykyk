@@ -189,8 +189,8 @@ class IdentityClusteringEngine(
             val interHeight = max(0, interBottom - interTop)
             val interArea = interWidth * interHeight
 
-            val areaA = a.width() * a.height()
-            val areaB = b.width() * b.height()
+            val areaA = max(0, a.right - a.left) * max(0, a.bottom - a.top)
+            val areaB = max(0, b.right - b.left) * max(0, b.bottom - b.top)
             val unionArea = areaA + areaB - interArea
 
             if (unionArea <= 0) return 0f

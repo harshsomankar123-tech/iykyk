@@ -71,10 +71,10 @@ class BestShotSelector(
         val fw = frameBitmap.width
         val fh = frameBitmap.height
 
-        val faceW = faceBox.width()
-        val faceH = faceBox.height()
-        val centerX = faceBox.centerX()
-        val centerY = faceBox.centerY()
+        val faceW = max(1, faceBox.right - faceBox.left)
+        val faceH = max(1, faceBox.bottom - faceBox.top)
+        val centerX = (faceBox.left + faceBox.right) / 2
+        val centerY = (faceBox.top + faceBox.bottom) / 2
 
         // Generously expanded base size
         val baseDim = max(faceW, faceH) * (1.0f + expansionRatio)

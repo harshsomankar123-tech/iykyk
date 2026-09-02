@@ -3,6 +3,7 @@ package com.example.iykyk
 import android.graphics.Rect
 import com.example.iykyk.domain.model.FaceDetectionResult
 import com.example.iykyk.domain.scoring.BestShotSelector
+import com.example.iykyk.testutil.TestFixtures.createRect
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.util.UUID
@@ -17,7 +18,7 @@ class BestShotSelectorTest {
         val frontal = FaceDetectionResult(
             id = "1",
             frameTimestampMs = 1000L,
-            boundingBox = Rect(100, 100, 300, 300),
+            boundingBox = createRect(100, 100, 300, 300),
             frameWidth = 1080,
             frameHeight = 1920,
             eulerX = 0f,
@@ -30,7 +31,7 @@ class BestShotSelectorTest {
         val turned = FaceDetectionResult(
             id = "2",
             frameTimestampMs = 1000L,
-            boundingBox = Rect(100, 100, 300, 300),
+            boundingBox = createRect(100, 100, 300, 300),
             frameWidth = 1080,
             frameHeight = 1920,
             eulerX = 0f,
@@ -42,11 +43,11 @@ class BestShotSelectorTest {
 
     @Test
     fun testBoundaryClippingPenalty() {
-        // Normal non-clipped face
+        // Normal non-clipped face (away from edges)
         val nonClipped = FaceDetectionResult(
             id = "1",
             frameTimestampMs = 1000L,
-            boundingBox = Rect(200, 200, 400, 400),
+            boundingBox = createRect(200, 200, 400, 400),
             frameWidth = 1080,
             frameHeight = 1920,
             sharpnessScore = 200f,
@@ -55,11 +56,11 @@ class BestShotSelectorTest {
             rightEyeOpenProb = 0.95f
         )
 
-        // Clipped face touching boundary
+        // Clipped face touching boundary (left <= 8)
         val clipped = FaceDetectionResult(
             id = "2",
             frameTimestampMs = 1000L,
-            boundingBox = Rect(2, 200, 400, 400), // left <= margin
+            boundingBox = createRect(2, 200, 400, 400),
             frameWidth = 1080,
             frameHeight = 1920,
             sharpnessScore = 200f,
@@ -79,7 +80,7 @@ class BestShotSelectorTest {
         val blurryFace = FaceDetectionResult(
             id = "blurry",
             frameTimestampMs = 1000L,
-            boundingBox = Rect(200, 200, 400, 400),
+            boundingBox = createRect(200, 200, 400, 400),
             frameWidth = 1080,
             frameHeight = 1920,
             sharpnessScore = 10f,
@@ -91,7 +92,7 @@ class BestShotSelectorTest {
         val perfectFace = FaceDetectionResult(
             id = "perfect",
             frameTimestampMs = 2000L,
-            boundingBox = Rect(200, 200, 400, 400),
+            boundingBox = createRect(200, 200, 400, 400),
             frameWidth = 1080,
             frameHeight = 1920,
             sharpnessScore = 450f,

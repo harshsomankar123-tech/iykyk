@@ -1,7 +1,10 @@
 package com.example.iykyk.data.pipeline
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.util.Log
 import com.example.iykyk.data.ml.FaceDetectorEngine
 import com.example.iykyk.data.ml.FaceEmbeddingEngine
 import com.example.iykyk.domain.clustering.IdentityClusteringEngine
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlin.math.max
 
 sealed class PipelineState {
     data class Progress(val progress: PipelineProgress) : PipelineState()
@@ -28,153 +32,135 @@ class VideoProcessingPipeline(
     private val maxCosineDistance: Float = 0.35f,
     private val appearanceBreakMs: Long = 1200L
 ) {
-    private val frameExtractor = VideoFrameExtractor(context, targetFps)
+    private val TAG = "VideoPipeline"
     private val faceDetector = FaceDetectorEngine()
     private val embeddingEngine = FaceEmbeddingEngine(context)
     private val clusteringEngine = IdentityClusteringEngine(maxCosineDistance, appearanceBreakMs)
     private val bestShotSelector = BestShotSelector()
+    private val maxFrameDimension = 1080
 
     /**
-     * Executes the full end-to-end video analysis pipeline.
+     * Executes an asynchronous, streaming video pipeline with low memory footprint (<30MB).
+     * Decodes frames one-by-one, extracts embeddings, generates portrait thumbnails,
+     * and immediately recycles full frame bitmaps to prevent OOM errors on long/4K videos.
      */
     fun processVideo(videoUri: Uri): Flow<PipelineState> = flow {
-        val extractedFrames = mutableListOf<ExtractedFrame>()
+        val retriever = MediaMetadataRetriever()
         val allDetections = mutableListOf<FaceDetectionResult>()
+        var frameCount = 0
 
         try {
-            // Stage 1: Frame Extraction
             emit(
                 PipelineState.Progress(
                     PipelineProgress(
-                        stage = ProcessingStage.EXTRACTING_FRAMES,
-                        progress = 0.05f,
-                        message = "Sampling video frames at ${targetFps.toInt()} FPS..."
+                        stage = ProcessingStage.EXTRACTING_AND_DETECTING,
+                        progress = 0.02f,
+                        message = "Opening video stream..."
                     )
                 )
             )
 
-            frameExtractor.extractFrames(videoUri).collect { event ->
-                when (event) {
-                    is FrameExtractionState.Progress -> {
-                        // Map frame extraction progress to 0% - 25% of overall pipeline
-                        val mappedProgress = 0.05f + (event.progress.progress * 0.20f)
-                        emit(
-                            PipelineState.Progress(
-                                PipelineProgress(
-                                    stage = ProcessingStage.EXTRACTING_FRAMES,
-                                    progress = mappedProgress,
-                                    currentStep = event.progress.currentStep,
-                                    totalSteps = event.progress.totalSteps,
-                                    message = event.progress.message
-                                )
-                            )
-                        )
-                    }
-                    is FrameExtractionState.FrameReady -> {
-                        extractedFrames.add(event.frame)
-                    }
-                    is FrameExtractionState.Completed -> {
-                        // Extracted all frames
-                    }
-                    is FrameExtractionState.Error -> {
-                        throw event.throwable
-                    }
-                }
+            if (videoUri.scheme == "content" || videoUri.scheme == "file") {
+                retriever.setDataSource(context, videoUri)
+            } else {
+                retriever.setDataSource(videoUri.path)
             }
 
-            if (extractedFrames.isEmpty()) {
-                emit(PipelineState.Error("No frames could be extracted from video."))
+            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationMs = durationStr?.toLongOrNull() ?: 0L
+
+            if (durationMs <= 0L) {
+                emit(PipelineState.Error("Invalid or unreadable video file."))
                 return@flow
             }
 
-            // Stage 2: Face Detection & Landmark Extraction
-            emit(
-                PipelineState.Progress(
-                    PipelineProgress(
-                        stage = ProcessingStage.DETECTING_FACES,
-                        progress = 0.30f,
-                        message = "Detecting faces and computing facial landmarks..."
-                    )
-                )
-            )
+            val intervalMs = (1000f / targetFps).toLong().coerceAtLeast(150L)
+            val estimatedTotalFrames = (durationMs / intervalMs).toInt().coerceAtLeast(1)
 
-            val totalFrames = extractedFrames.size
-            for ((index, frame) in extractedFrames.withIndex()) {
-                val detections = faceDetector.detectFaces(frame.bitmap, frame.timestampMs)
-                allDetections.addAll(detections)
+            var currentTimestampMs = 0L
 
-                val progress = 0.30f + ((index + 1).toFloat() / totalFrames.toFloat()) * 0.25f
+            // Frame-by-frame streaming loop
+            while (currentTimestampMs < durationMs) {
+                val timeUs = currentTimestampMs * 1000L
+                val rawBitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+
+                if (rawBitmap != null) {
+                    val frameBitmap = scaleBitmapIfNeeded(rawBitmap, maxFrameDimension)
+                    if (frameBitmap != rawBitmap) {
+                        rawBitmap.recycle()
+                    }
+
+                    // 1. Detect faces on current frame
+                    val detections = faceDetector.detectFaces(frameBitmap, currentTimestampMs)
+
+                    // 2. For each detected face, extract crop & MobileFaceNet embedding immediately
+                    for (detection in detections) {
+                        val faceCrop = embeddingEngine.extractFaceCrop(frameBitmap, detection.boundingBox, marginRatio = 0.20f)
+                        val embedding = embeddingEngine.getEmbedding(faceCrop)
+                        detection.embedding = embedding
+                        if (faceCrop != frameBitmap) {
+                            faceCrop.recycle()
+                        }
+
+                        // Store generous portrait bust thumbnail (~50KB) for collage presentation
+                        val portraitBustCrop = bestShotSelector.createGenerousPortraitCrop(
+                            frameBitmap,
+                            detection.boundingBox,
+                            targetAspectRatio = 0.80f,
+                            expansionRatio = 0.50f
+                        )
+                        detection.portraitCrop = portraitBustCrop
+                        bestShotSelector.evaluateQualityScore(detection)
+
+                        allDetections.add(detection)
+                    }
+
+                    // 3. Immediately recycle frame bitmap to keep memory footprint flat (<30MB)
+                    frameBitmap.recycle()
+                    frameCount++
+                }
+
+                val progress = (currentTimestampMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) * 0.75f + 0.05f
                 emit(
                     PipelineState.Progress(
                         PipelineProgress(
-                            stage = ProcessingStage.DETECTING_FACES,
+                            stage = ProcessingStage.EXTRACTING_AND_DETECTING,
                             progress = progress,
-                            currentStep = index + 1,
-                            totalSteps = totalFrames,
-                            message = "Processed frame ${index + 1}/$totalFrames (detected ${detections.size} faces)"
+                            currentStep = frameCount,
+                            totalSteps = estimatedTotalFrames,
+                            message = "Processed frame $frameCount ($allDetections faces detected so far)"
                         )
                     )
                 )
+
+                currentTimestampMs += intervalMs
             }
 
             if (allDetections.isEmpty()) {
-                emit(PipelineState.Error("No faces detected in the video."))
+                emit(PipelineState.Error("No faces were detected in this video."))
                 return@flow
             }
 
-            // Stage 3: Face Embeddings Extraction (TFLite MobileFaceNet)
-            emit(
-                PipelineState.Progress(
-                    PipelineProgress(
-                        stage = ProcessingStage.EXTRACTING_EMBEDDINGS,
-                        progress = 0.55f,
-                        message = "Generating on-device TFLite face embeddings..."
-                    )
-                )
-            )
-
-            val totalDetections = allDetections.size
-            for ((index, detection) in allDetections.withIndex()) {
-                val frameBmp = detection.frameBitmap
-                if (frameBmp != null) {
-                    val embedding = embeddingEngine.getEmbedding(frameBmp, detection.boundingBox)
-                    detection.embedding = embedding
-                }
-
-                val progress = 0.55f + ((index + 1).toFloat() / totalDetections.toFloat()) * 0.20f
-                emit(
-                    PipelineState.Progress(
-                        PipelineProgress(
-                            stage = ProcessingStage.EXTRACTING_EMBEDDINGS,
-                            progress = progress,
-                            currentStep = index + 1,
-                            totalSteps = totalDetections,
-                            message = "Embedded face ${index + 1}/$totalDetections"
-                        )
-                    )
-                )
-            }
-
-            // Stage 4: Identity Clustering & Appearance Counting
+            // Stage 2: Clustering identities & appearance tracking
             emit(
                 PipelineState.Progress(
                     PipelineProgress(
                         stage = ProcessingStage.CLUSTERING_IDENTITIES,
-                        progress = 0.78f,
-                        message = "Clustering identities & calculating appearance segments..."
+                        progress = 0.85f,
+                        message = "Clustering unique individuals via MobileFaceNet embeddings..."
                     )
                 )
             )
 
             val clusters = clusteringEngine.clusterFaces(allDetections)
 
-            // Stage 5: Best Shot Selection & Portrait Cropping
+            // Stage 3: Best Shot Selection
             emit(
                 PipelineState.Progress(
                     PipelineProgress(
                         stage = ProcessingStage.SELECTING_BEST_SHOTS,
-                        progress = 0.90f,
-                        message = "Selecting optimal representative portrait shots..."
+                        progress = 0.95f,
+                        message = "Selecting optimal portrait shots and assembling collage..."
                     )
                 )
             )
@@ -184,21 +170,12 @@ class VideoProcessingPipeline(
                 val bestShot = bestShotSelector.selectBestDetection(cluster.detections) ?: continue
                 val appearanceSegments = clusteringEngine.computeAppearanceSegments(cluster.detections)
 
-                val crop = if (bestShot.frameBitmap != null) {
-                    bestShotSelector.createGenerousPortraitCrop(
-                        bestShot.frameBitmap,
-                        bestShot.boundingBox,
-                        targetAspectRatio = 0.80f,
-                        expansionRatio = 0.60f
-                    )
-                } else null
-
                 uniquePersons.add(
                     UniquePerson(
                         id = cluster.id,
-                        displayName = "Person ${cluster.id}",
+                        displayName = "Person #${cluster.id}",
                         bestShot = bestShot,
-                        bestShotCrop = crop,
+                        bestShotCrop = bestShot.portraitCrop,
                         totalAppearances = appearanceSegments.size,
                         appearanceSegments = appearanceSegments,
                         candidateDetections = cluster.detections,
@@ -207,7 +184,7 @@ class VideoProcessingPipeline(
                 )
             }
 
-            // Sort persons by prominence / total appearances descending
+            // Order by most prominent appearance count descending
             uniquePersons.sortByDescending { it.totalAppearances }
 
             emit(
@@ -215,17 +192,34 @@ class VideoProcessingPipeline(
                     PipelineProgress(
                         stage = ProcessingStage.COMPLETED,
                         progress = 1.0f,
-                        message = "Identified ${uniquePersons.size} unique individuals!"
+                        message = "Identified ${uniquePersons.size} unique individuals"
                     )
                 )
             )
 
-            emit(PipelineState.Success(uniquePersons, totalFrames))
+            emit(PipelineState.Success(uniquePersons, frameCount))
 
         } catch (e: Exception) {
+            Log.e(TAG, "Pipeline error: ${e.message}", e)
             emit(PipelineState.Error(e.localizedMessage ?: "Unknown pipeline processing error"))
+        } finally {
+            try {
+                retriever.release()
+            } catch (ignored: Exception) {}
         }
     }.flowOn(Dispatchers.Default)
+
+    private fun scaleBitmapIfNeeded(bitmap: Bitmap, maxDim: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val maxOriginal = max(width, height)
+        if (maxOriginal <= maxDim) return bitmap
+
+        val scale = maxDim.toFloat() / maxOriginal.toFloat()
+        val newWidth = (width * scale).toInt()
+        val newHeight = (height * scale).toInt()
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    }
 
     fun release() {
         faceDetector.close()

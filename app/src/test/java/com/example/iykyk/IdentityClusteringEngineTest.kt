@@ -2,9 +2,10 @@ package com.example.iykyk
 
 import android.graphics.Rect
 import com.example.iykyk.data.ml.FaceEmbeddingEngine
-import com.example.iykyk.data.pipeline.SampleVideoGenerator
 import com.example.iykyk.domain.clustering.IdentityClusteringEngine
 import com.example.iykyk.domain.model.FaceDetectionResult
+import com.example.iykyk.testutil.TestFixtures
+import com.example.iykyk.testutil.TestFixtures.createRect
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.util.UUID
@@ -33,10 +34,10 @@ class IdentityClusteringEngineTest {
 
     @Test
     fun testCalculateIoU() {
-        val boxA = Rect(0, 0, 100, 100)
-        val boxB = Rect(0, 0, 100, 100)
-        val boxC = Rect(50, 0, 150, 100)
-        val boxD = Rect(200, 200, 300, 300)
+        val boxA = createRect(0, 0, 100, 100)
+        val boxB = createRect(0, 0, 100, 100)
+        val boxC = createRect(50, 0, 150, 100)
+        val boxD = createRect(200, 200, 300, 300)
 
         // 100% overlap
         assertThat(IdentityClusteringEngine.calculateIoU(boxA, boxB)).isWithin(1e-5f).of(1.0f)
@@ -72,22 +73,20 @@ class IdentityClusteringEngineTest {
     }
 
     @Test
-    fun testSample1BenchmarkValidation() {
-        // Sample 1: 5 distinct people, each having 4 continuous appearances with co-occurrences
-        val sample1Detections = SampleVideoGenerator.createSample1SyntheticData()
+    fun testHierarchicalClusteringMathWithSyntheticFixtures() {
+        val testData = TestFixtures.createSyntheticClusteringTestData()
 
-        val clusters = clusteringEngine.clusterFaces(sample1Detections)
+        val clusters = clusteringEngine.clusterFaces(testData)
 
-        // Validate 5 unique identities isolated
+        // Validates mathematical grouping separates 5 synthetic clusters
         assertThat(clusters).hasSize(5)
 
-        // Validate each person has exactly 4 continuous appearance segments
+        // Validates temporal appearance segmentation groups 4 segments per cluster
         for (cluster in clusters) {
             val segments = clusteringEngine.computeAppearanceSegments(cluster.detections)
             assertThat(segments).hasSize(4)
         }
 
-        // Total appearances across all individuals must equal 20
         val totalAppearances = clusters.sumOf {
             clusteringEngine.computeAppearanceSegments(it.detections).size
         }
@@ -98,7 +97,7 @@ class IdentityClusteringEngineTest {
         return FaceDetectionResult(
             id = UUID.randomUUID().toString(),
             frameTimestampMs = timestampMs,
-            boundingBox = Rect(10, 10, 100, 100),
+            boundingBox = createRect(10, 10, 100, 100),
             frameWidth = 1080,
             frameHeight = 1920
         )

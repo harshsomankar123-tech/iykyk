@@ -9,8 +9,7 @@ import android.graphics.Rect
 enum class ProcessingStage(val title: String) {
     IDLE("Ready"),
     EXTRACTING_FRAMES("Extracting Frames (3–5 FPS)"),
-    DETECTING_FACES("Detecting Faces & Landmarks"),
-    EXTRACTING_EMBEDDINGS("Generating TFLite Face Embeddings"),
+    EXTRACTING_AND_DETECTING("Processing Video Frames (ML Kit + TFLite)"),
     CLUSTERING_IDENTITIES("Clustering Unique Identities"),
     SELECTING_BEST_SHOTS("Selecting Best Representative Shots"),
     COMPLETED("Collage Ready"),
@@ -29,7 +28,8 @@ data class PipelineProgress(
 )
 
 /**
- * Single face detection in a video frame with extracted ML Kit attributes and sharpness.
+ * Lightweight face detection in a video frame with extracted ML Kit attributes,
+ * sharpness, embedding vector, and generous cropped portrait (instead of retaining entire 8MB video frame).
  */
 data class FaceDetectionResult(
     val id: String,
@@ -44,8 +44,8 @@ data class FaceDetectionResult(
     val rightEyeOpenProb: Float? = null,
     val smileProb: Float? = null,
     val sharpnessScore: Float = 0f,
-    val frameBitmap: Bitmap? = null,
-    var embedding: FloatArray? = null,
+    var portraitCrop: Bitmap? = null, // Memory-efficient generous crop (~50KB)
+    var embedding: FloatArray? = null, // 192-d or 128-d MobileFaceNet vector
     var qualityScore: Float = 0f
 ) {
     val isTouchingBoundary: Boolean
@@ -120,5 +120,5 @@ data class CollageConfig(
     val cardCornerRadiusDp: Int = 16,
     val spacingDp: Int = 12,
     val maxColumns: Int = 2,
-    val bustCropExpansion: Float = 0.35f // 35% extra margin for generous portrait bust shot
+    val bustCropExpansion: Float = 0.35f
 )

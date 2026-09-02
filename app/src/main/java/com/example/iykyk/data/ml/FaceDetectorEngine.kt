@@ -4,18 +4,17 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import com.example.iykyk.domain.model.FaceDetectionResult
-import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 class FaceDetectorEngine {
 
@@ -27,23 +26,22 @@ class FaceDetectorEngine {
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
             .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
-            .setMinFaceSize(0.10f) // Ignore tiny background noise faces
+            .setMinFaceSize(0.08f) // High sensitivity for real video faces
             .build()
         detector = FaceDetection.getClient(options)
     }
 
     /**
-     * Runs ML Kit Face Detection synchronously on the given frame bitmap.
+     * Runs ML Kit Face Detection asynchronously using coroutine-native await().
      */
     suspend fun detectFaces(
         frameBitmap: Bitmap,
         frameTimestampMs: Long
     ): List<FaceDetectionResult> = withContext(Dispatchers.Default) {
         val inputImage = InputImage.fromBitmap(frameBitmap, 0)
-        val task = detector.process(inputImage)
 
         val faces: List<Face> = try {
-            Tasks.await(task)
+            detector.process(inputImage).await()
         } catch (e: Exception) {
             emptyList()
         }
@@ -81,14 +79,14 @@ class FaceDetectorEngine {
                 rightEyeOpenProb = face.rightEyeOpenProbability,
                 smileProb = face.smilingProbability,
                 sharpnessScore = sharpness,
-                frameBitmap = frameBitmap
+                portraitCrop = null // Will be cropped and assigned during streaming
             )
         }
     }
 
     /**
-     * Calculates the variance of the Laplacian filter on the face region.
-     * High variance = sharp edges and fine details. Low variance = blurry / out-of-focus.
+     * Calculates the statistical variance of the 3x3 Laplacian filter on the face region.
+     * High variance = sharp edges & in-focus details. Low variance = blurry motion / out-of-focus.
      */
     fun calculateLaplacianSharpness(bitmap: Bitmap, box: Rect): Float {
         val width = box.width()
@@ -117,7 +115,7 @@ class FaceDetectorEngine {
         crop.getPixels(pixels, 0, sampleW, 0, 0, sampleW, sampleH)
         crop.recycle()
 
-        // Grayscale conversion
+        // Grayscale conversion: Y = 0.299R + 0.587G + 0.114B
         val gray = FloatArray(sampleW * sampleH)
         for (i in pixels.indices) {
             val c = pixels[i]
@@ -155,6 +153,8 @@ class FaceDetectorEngine {
     }
 
     fun close() {
-        detector.close()
+        try {
+            detector.close()
+        } catch (ignored: Exception) {}
     }
 }

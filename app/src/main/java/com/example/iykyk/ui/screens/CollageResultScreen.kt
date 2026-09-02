@@ -324,7 +324,7 @@ fun PersonDetailCard(person: UniquePerson) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Best Shot Thumbnail
-            val thumbnail = person.bestShotCrop ?: person.bestShot.frameBitmap
+            val thumbnail = person.bestShotCrop ?: person.bestShot.portraitCrop
             if (thumbnail != null) {
                 Image(
                     bitmap = thumbnail.asImageBitmap(),

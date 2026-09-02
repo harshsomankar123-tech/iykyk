@@ -211,7 +211,7 @@ object CollageBitmapRenderer {
         canvas.drawRoundRect(rect, radius, radius, cardPaint)
 
         // Portrait Image
-        val portrait = person.bestShotCrop ?: person.bestShot.frameBitmap
+        val portrait = person.bestShotCrop ?: person.bestShot.portraitCrop
         if (portrait != null) {
             val roundedBmp = createRoundedBitmap(portrait, rect.width().toInt(), rect.height().toInt(), radius)
             canvas.drawBitmap(roundedBmp, rect.left, rect.top, null)
