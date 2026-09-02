@@ -59,6 +59,9 @@ fun AppNavigation(viewModel: CollageViewModel) {
                 },
                 onViewResults = {
                     navController.navigate("results")
+                },
+                onClearVideo = {
+                    viewModel.resetState()
                 }
             )
         }

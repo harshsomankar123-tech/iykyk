@@ -18,12 +18,15 @@ class BestShotSelector(
      * Evaluates and assigns the composite quality score for a face detection.
      */
     fun evaluateQualityScore(detection: FaceDetectionResult): Float {
-        // 1. Sharpness normalized via soft saturation: variance / (variance + 60.0) -> [0, 1]
-        val sSharp = if (detection.sharpnessScore > 0f) {
-            detection.sharpnessScore / (detection.sharpnessScore + 60.0f)
-        } else {
-            0.1f
+        // Blurry face gate: severely penalize blurry shots so sharp faces are always preferred
+        if (detection.sharpnessScore < 35f) {
+            val blurScore = (detection.sharpnessScore / 1000f).coerceIn(0f, 0.05f)
+            detection.qualityScore = blurScore
+            return blurScore
         }
+
+        // 1. Sharpness normalized via soft saturation: variance / (variance + 120.0) -> [0, 1]
+        val sSharp = detection.sharpnessScore / (detection.sharpnessScore + 120.0f)
 
         // 2. Frontality score
         val sFront = detection.frontalityScore
@@ -65,8 +68,9 @@ class BestShotSelector(
     fun createGenerousPortraitCrop(
         frameBitmap: Bitmap,
         faceBox: Rect,
+        otherFaceBoxes: List<Rect> = emptyList(),
         targetAspectRatio: Float = 0.80f, // 4:5 portrait ratio
-        expansionRatio: Float = 0.60f     // 60% extra margin for bust/hair
+        expansionRatio: Float = 0.20f     // 20% clean margin
     ): Bitmap {
         val fw = frameBitmap.width
         val fh = frameBitmap.height
@@ -76,39 +80,47 @@ class BestShotSelector(
         val centerX = (faceBox.left + faceBox.right) / 2
         val centerY = (faceBox.top + faceBox.bottom) / 2
 
-        // Generously expanded base size
         val baseDim = max(faceW, faceH) * (1.0f + expansionRatio)
 
-        var cropHeight = baseDim / targetAspectRatio
-        var cropWidth = baseDim
+        val cropHeight = baseDim / targetAspectRatio
+        val cropWidth = baseDim
 
-        // Shift center slightly downward to capture hair on top and neck/shoulders below
-        val adjustedCenterY = centerY + (faceH * 0.15f).toInt()
+        // Shift center slightly downward for neck/hair balance
+        val adjustedCenterY = centerY + (faceH * 0.10f).toInt()
 
         var left = (centerX - cropWidth / 2f).toInt()
         var top = (adjustedCenterY - cropHeight / 2f).toInt()
         var right = (centerX + cropWidth / 2f).toInt()
         var bottom = (adjustedCenterY + cropHeight / 2f).toInt()
 
-        // Clamp to bitmap boundaries while maintaining aspect ratio
-        if (left < 0) {
-            right += -left
-            left = 0
+        // Split-screen seam constraint: if multiple faces are present, never cross the center line
+        if (otherFaceBoxes.size >= 2) {
+            val halfW = fw / 2
+            if (centerX < halfW) {
+                right = min(right, halfW)
+            } else {
+                left = max(left, halfW)
+            }
         }
-        if (top < 0) {
-            bottom += -top
-            top = 0
+
+        // Boundary constraint: never overlap into another person's face in multi-person scenes
+        for (other in otherFaceBoxes) {
+            if (other == faceBox) continue
+            val otherCenterX = (other.left + other.right) / 2
+            if (otherCenterX < centerX) {
+                val midX = (other.right + faceBox.left) / 2
+                left = max(left, midX)
+            } else if (otherCenterX > centerX) {
+                val midX = (faceBox.right + other.left) / 2
+                right = min(right, midX)
+            }
         }
-        if (right > fw) {
-            val overflow = right - fw
-            left = max(0, left - overflow)
-            right = fw
-        }
-        if (bottom > fh) {
-            val overflow = bottom - fh
-            top = max(0, top - overflow)
-            bottom = fh
-        }
+
+        // Clamp to bitmap boundaries
+        left = left.coerceIn(0, fw - 1)
+        top = top.coerceIn(0, fh - 1)
+        right = right.coerceIn(left + 1, fw)
+        bottom = bottom.coerceIn(top + 1, fh)
 
         val finalW = max(1, right - left)
         val finalH = max(1, bottom - top)

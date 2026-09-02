@@ -145,9 +145,13 @@ class CollageViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun saveToGallery(onComplete: (Boolean) -> Unit) {
-        val bmp = _uiState.value.renderedCollageBitmap ?: return
+        val currentPersons = _uiState.value.persons
+        if (currentPersons.isEmpty()) return
+        val currentConfig = _uiState.value.config
+        val bmp = CollageBitmapRenderer.renderStoryCollage(currentPersons, currentConfig)
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isExporting = true) }
+            _uiState.update { it.copy(isExporting = true, renderedCollageBitmap = bmp) }
             val uri = exportManager.saveToGallery(bmp)
             _uiState.update { it.copy(isExporting = false) }
             onComplete(uri != null)
@@ -155,8 +159,13 @@ class CollageViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun shareCollage() {
-        val bmp = _uiState.value.renderedCollageBitmap ?: return
+        val currentPersons = _uiState.value.persons
+        if (currentPersons.isEmpty()) return
+        val currentConfig = _uiState.value.config
+        val bmp = CollageBitmapRenderer.renderStoryCollage(currentPersons, currentConfig)
+
         viewModelScope.launch {
+            _uiState.update { it.copy(renderedCollageBitmap = bmp) }
             exportManager.shareCollage(bmp)
         }
     }

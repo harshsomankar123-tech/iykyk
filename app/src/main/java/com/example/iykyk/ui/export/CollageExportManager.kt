@@ -32,7 +32,11 @@ class CollageExportManager(private val context: Context) {
             }
 
             val resolver = context.contentResolver
-            val imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            val imageUri = try {
+                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            } catch (e: Exception) {
+                null
+            }
 
             imageUri?.let { uri ->
                 try {
@@ -46,23 +50,23 @@ class CollageExportManager(private val context: Context) {
                     }
                     uri
                 } catch (e: Exception) {
-                    resolver.delete(uri, null, null)
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                     null
                 }
             }
         }
 
     /**
-     * Prepares a shareable URI in cache directory and launches Android ShareSheet.
+     * Prepares a shareable URI in cache directory and launches Android ShareSheet on Main thread.
      */
     suspend fun shareCollage(bitmap: Bitmap, title: String = "Share Story Collage") = withContext(Dispatchers.IO) {
         try {
             val cachePath = File(context.cacheDir, "shared_images")
             cachePath.mkdirs()
             val file = File(cachePath, "story_collage_${System.currentTimeMillis()}.png")
-            val stream = FileOutputStream(file)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-            stream.close()
+            FileOutputStream(file).use { stream ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            }
 
             val contentUri = FileProvider.getUriForFile(
                 context,
@@ -73,15 +77,21 @@ class CollageExportManager(private val context: Context) {
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
+                clipData = android.content.ClipData.newRawUri("Story Collage", contentUri)
                 putExtra(Intent.EXTRA_SUBJECT, "IYKYK Story Collage")
                 putExtra(Intent.EXTRA_TEXT, "✨ Created with IYKYK Unique Person Collage!")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
             val chooser = Intent.createChooser(shareIntent, title).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(chooser)
+
+            withContext(Dispatchers.Main) {
+                context.startActivity(chooser)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

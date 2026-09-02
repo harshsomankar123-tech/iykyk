@@ -49,7 +49,7 @@ class FaceDetectorEngine {
         val frameWidth = frameBitmap.width
         val frameHeight = frameBitmap.height
 
-        faces.mapNotNull { face ->
+        val detections = faces.mapNotNull { face ->
             val box = face.boundingBox
             // Ensure bounding box is clamped to bitmap bounds
             val left = box.left.coerceIn(0, frameWidth - 1)
@@ -61,7 +61,12 @@ class FaceDetectorEngine {
             val height = bottom - top
 
             // Skip invalid or ultra-tiny face boxes
-            if (width < 20 || height < 20) return@mapNotNull null
+            if (width < 25 || height < 25) return@mapNotNull null
+
+            // Human face aspect ratio validation: genuine faces are between 0.50 and 1.50 aspect
+            // Accepts people with glasses, headsets, and head coverings while rejecting phantom seam bars
+            val aspect = width.toFloat() / height.toFloat()
+            if (aspect < 0.50f || aspect > 1.50f) return@mapNotNull null
 
             val clampedBox = Rect(left, top, right, bottom)
             val sharpness = calculateLaplacianSharpness(frameBitmap, clampedBox)
@@ -82,6 +87,48 @@ class FaceDetectorEngine {
                 portraitCrop = null // Will be cropped and assigned during streaming
             )
         }
+
+        // Apply Non-Maximum Suppression to remove duplicate bounding boxes on the same face
+        performNms(detections, iouThreshold = 0.25f)
+    }
+
+    private fun performNms(detections: List<FaceDetectionResult>, iouThreshold: Float): List<FaceDetectionResult> {
+        if (detections.size <= 1) return detections
+        val sorted = detections.sortedByDescending { it.sharpnessScore }
+        val result = mutableListOf<FaceDetectionResult>()
+        for (det in sorted) {
+            val hasOverlap = result.any { calculateBoxIoU(it.boundingBox, det.boundingBox) > iouThreshold }
+            if (!hasOverlap) {
+                result.add(det)
+            }
+        }
+        // Discard any phantom bounding box that straddles across two other detected faces (e.g. split-screen seam artifact)
+        if (result.size >= 3) {
+            val nonBridging = result.filterNot { candidate ->
+                val candBox = candidate.boundingBox
+                val hasFaceToLeft = result.any { other -> other != candidate && other.boundingBox.centerX() < candBox.left && calculateBoxIoU(other.boundingBox, candBox) > 0.05f }
+                val hasFaceToRight = result.any { other -> other != candidate && other.boundingBox.centerX() > candBox.right && calculateBoxIoU(other.boundingBox, candBox) > 0.05f }
+                hasFaceToLeft && hasFaceToRight
+            }
+            return if (nonBridging.isNotEmpty()) nonBridging else result
+        }
+
+        return result
+    }
+
+    private fun calculateBoxIoU(a: Rect, b: Rect): Float {
+        val interLeft = max(a.left, b.left)
+        val interTop = max(a.top, b.top)
+        val interRight = min(a.right, b.right)
+        val interBottom = min(a.bottom, b.bottom)
+        val interW = max(0, interRight - interLeft)
+        val interH = max(0, interBottom - interTop)
+        val interArea = interW * interH
+        val areaA = max(0, a.right - a.left) * max(0, a.bottom - a.top)
+        val areaB = max(0, b.right - b.left) * max(0, b.bottom - b.top)
+        val unionArea = areaA + areaB - interArea
+        if (unionArea <= 0) return 0f
+        return interArea.toFloat() / unionArea.toFloat()
     }
 
     /**

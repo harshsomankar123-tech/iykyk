@@ -29,7 +29,7 @@ sealed class PipelineState {
 class VideoProcessingPipeline(
     private val context: Context,
     private val targetFps: Float = 4.0f,
-    private val maxCosineDistance: Float = 0.35f,
+    private val maxCosineDistance: Float = 0.52f, // 0.52 unites cross-scene appearances
     private val appearanceBreakMs: Long = 1200L
 ) {
     private val TAG = "VideoPipeline"
@@ -95,22 +95,39 @@ class VideoProcessingPipeline(
 
                     // 2. For each detected face, extract crop & MobileFaceNet embedding immediately
                     for (detection in detections) {
-                        val faceCrop = embeddingEngine.extractFaceCrop(frameBitmap, detection.boundingBox, marginRatio = 0.20f)
+                        // Skip severe camera transition blur (< 5 sharpness)
+                        if (detection.sharpnessScore < 5f) {
+                            continue
+                        }
+
+                        val faceCrop = embeddingEngine.extractFaceCrop(
+                            frameBitmap,
+                            detection.boundingBox,
+                            marginRatio = 0.15f,
+                            rollAngle = detection.eulerZ
+                        )
                         val embedding = embeddingEngine.getEmbedding(faceCrop)
                         detection.embedding = embedding
                         if (faceCrop != frameBitmap) {
                             faceCrop.recycle()
                         }
 
-                        // Store generous portrait bust thumbnail (~50KB) for collage presentation
+                        val allOtherBoxes = detections.map { it.boundingBox }
+
+                        // Store clean portrait bust thumbnail (clips against other faces in split-screen / two-shots)
                         val portraitBustCrop = bestShotSelector.createGenerousPortraitCrop(
                             frameBitmap,
                             detection.boundingBox,
+                            otherFaceBoxes = allOtherBoxes,
                             targetAspectRatio = 0.80f,
-                            expansionRatio = 0.50f
+                            expansionRatio = 0.20f
                         )
                         detection.portraitCrop = portraitBustCrop
-                        bestShotSelector.evaluateQualityScore(detection)
+                        val baseQuality = bestShotSelector.evaluateQualityScore(detection)
+                        // Generous bonus for solo frames so solo portraits are preferred over crowded multi-person shots
+                        if (detections.size == 1) {
+                            detection.qualityScore = (baseQuality + 0.25f).coerceIn(0f, 1f)
+                        }
 
                         allDetections.add(detection)
                     }
@@ -128,7 +145,7 @@ class VideoProcessingPipeline(
                             progress = progress,
                             currentStep = frameCount,
                             totalSteps = estimatedTotalFrames,
-                            message = "Processed frame $frameCount ($allDetections faces detected so far)"
+                            message = "Processed frame $frameCount (${allDetections.size} faces detected so far)"
                         )
                     )
                 )

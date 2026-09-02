@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,11 +21,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,12 +54,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.iykyk.domain.model.UniquePerson
 import com.example.iykyk.ui.CollageUiState
 import com.example.iykyk.ui.theme.AccentGray
@@ -79,6 +86,8 @@ fun CollageResultScreen(
 ) {
     val context = LocalContext.current
     var isSaving by remember { mutableStateOf(false) }
+    var selectedPersonForPreview by remember { mutableStateOf<UniquePerson?>(null) }
+    var isCollageFullScreenOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -140,23 +149,40 @@ fun CollageResultScreen(
             item {
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Rendered Collage Preview Container (9:16 Instagram Story Ratio)
+                // Rendered Collage Preview Container (Tap to open full screen)
                 uiState.renderedCollageBitmap?.let { bitmap ->
-                    Card(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth(0.92f)
                             .aspectRatio(9f / 16f)
                             .shadow(16.dp, shape = RoundedCornerShape(20.dp))
-                            .border(1.dp, CardBorder, RoundedCornerShape(20.dp)),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                            .clip(RoundedCornerShape(20.dp))
+                            .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
+                            .clickable { isCollageFullScreenOpen = true }
                     ) {
                         Image(
                             bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "Generated Story Collage",
+                            contentDescription = "Generated Story Collage (Tap to enlarge)",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
+
+                        // Floating expand hint pill
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(12.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.7f))
+                                .padding(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Fullscreen,
+                                contentDescription = "Full Screen",
+                                tint = PureWhite,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
@@ -177,34 +203,29 @@ fun CollageResultScreen(
                     ) {
                         Text(
                             text = "Collage Settings",
-                            fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
                             color = PureWhite
                         )
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        var titleText by remember { mutableStateOf(uiState.config.title) }
                         OutlinedTextField(
-                            value = titleText,
-                            onValueChange = {
-                                titleText = it
-                                onUpdateTitle(it)
-                            },
+                            value = uiState.config.title,
+                            onValueChange = onUpdateTitle,
                             label = { Text("Collage Title", color = TextSecondary) },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = PureWhite,
-                                unfocusedTextColor = PureWhite,
                                 focusedBorderColor = PureWhite,
                                 unfocusedBorderColor = CardBorder,
+                                focusedTextColor = PureWhite,
+                                unfocusedTextColor = PureWhite,
                                 cursorColor = PureWhite
-                            ),
-                            singleLine = true
+                            )
                         )
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -219,14 +240,14 @@ fun CollageResultScreen(
                                     color = PureWhite
                                 )
                                 Text(
-                                    text = "Display segment counts on cards",
+                                    text = "Displays appearance counts on photos",
                                     fontSize = 12.sp,
-                                    color = TextMuted
+                                    color = TextSecondary
                                 )
                             }
                             Switch(
                                 checked = uiState.config.showAppearanceBadges,
-                                onCheckedChange = { onToggleBadges(it) },
+                                onCheckedChange = onToggleBadges,
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = PureBlack,
                                     checkedTrackColor = PureWhite,
@@ -238,33 +259,65 @@ fun CollageResultScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Share Primary Action Button (Monochrome White Button)
-                Button(
-                    onClick = onShareCollage,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PureWhite,
-                        contentColor = PureBlack
-                    )
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = {
+                            isSaving = true
+                            onSaveToGallery { success ->
+                                isSaving = false
+                                val msg = if (success) "Saved to Pictures/IYKYK" else "Failed to save image."
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PureWhite,
+                            contentColor = PureBlack
+                        )
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Share,
+                            imageVector = Icons.Default.Download,
                             contentDescription = null,
-                            tint = PureBlack,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Share Story Collage",
-                            fontSize = 15.sp,
+                            text = if (isSaving) "Saving..." else "Save Image",
                             fontWeight = FontWeight.Bold,
-                            color = PureBlack
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = onShareCollage,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ElevatedSurface,
+                            contentColor = PureWhite
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Share",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
                         )
                     }
                 }
@@ -284,7 +337,7 @@ fun CollageResultScreen(
                         color = PureWhite
                     )
                     Text(
-                        text = "${uiState.persons.size} Detected",
+                        text = "${uiState.persons.size} Detected • Tap to view",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = TextSecondary
@@ -294,9 +347,12 @@ fun CollageResultScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // List of Detected Unique Persons
+            // List of Detected Unique Persons (Clicking any opens their full photo preview)
             items(uiState.persons) { person ->
-                PersonDetailCard(person = person)
+                PersonDetailCard(
+                    person = person,
+                    onClick = { selectedPersonForPreview = person }
+                )
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
@@ -305,15 +361,195 @@ fun CollageResultScreen(
             }
         }
     }
+
+    // Modal Dialog: Full Person Portrait Photo Preview
+    selectedPersonForPreview?.let { person ->
+        Dialog(
+            onDismissRequest = { selectedPersonForPreview = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.95f))
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.95f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .border(1.dp, CardBorder, RoundedCornerShape(24.dp)),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Top Bar in Modal
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = person.displayName,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PureWhite
+                                )
+                                Text(
+                                    text = "${person.totalAppearances} total appearances in video",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                            IconButton(
+                                onClick = { selectedPersonForPreview = null },
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(ElevatedSurface)
+                                    .size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = PureWhite,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Large Full Portrait Photo
+                        val portrait = person.bestShotCrop ?: person.bestShot.portraitCrop
+                        if (portrait != null) {
+                            Image(
+                                bitmap = portrait.asImageBitmap(),
+                                contentDescription = person.displayName,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(0.80f)
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(0.80f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(ElevatedSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Face,
+                                    contentDescription = null,
+                                    tint = PureWhite,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Appearance Timestamps Breakdown
+                        if (person.appearanceSegments.isNotEmpty()) {
+                            Text(
+                                text = "Appearance Timestamps:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PureWhite,
+                                modifier = Modifier.align(Alignment.Start)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                person.appearanceSegments.forEachIndexed { idx, segment ->
+                                    val startSec = segment.startMs / 1000f
+                                    val endSec = segment.endMs / 1000f
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(ElevatedSurface)
+                                            .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = "#${idx + 1}: ${String.format("%.1f", startSec)}s - ${String.format("%.1f", endSec)}s",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = PureWhite
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal Dialog: Full-Screen Story Collage Preview
+    if (isCollageFullScreenOpen && uiState.renderedCollageBitmap != null) {
+        Dialog(
+            onDismissRequest = { isCollageFullScreenOpen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(PureBlack),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = uiState.renderedCollageBitmap.asImageBitmap(),
+                    contentDescription = "Full Screen Story Collage",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+
+                // Close Button
+                IconButton(
+                    onClick = { isCollageFullScreenOpen = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(24.dp)
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.7f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = PureWhite,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PersonDetailCard(person: UniquePerson) {
+fun PersonDetailCard(
+    person: UniquePerson,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, CardBorder, RoundedCornerShape(14.dp)),
+            .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
+            .clickable { onClick() },
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = DarkSurface)
     ) {
@@ -323,7 +559,7 @@ fun PersonDetailCard(person: UniquePerson) {
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Best Shot Thumbnail
+            // Best Shot Thumbnail (Tap opens preview)
             val thumbnail = person.bestShotCrop ?: person.bestShot.portraitCrop
             if (thumbnail != null) {
                 Image(
@@ -371,47 +607,48 @@ fun PersonDetailCard(person: UniquePerson) {
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(ElevatedSurface)
-                            .border(1.dp, CardBorder, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "${person.totalAppearances} appearances",
+                            text = "${person.totalAppearances} ${if (person.totalAppearances == 1) "appearance" else "appearances"}",
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.SemiBold,
                             color = PureWhite
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Quality Score: ${(person.compositeQualityScore * 100).toInt()}%",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Temporal appearance intervals pills
+                // Appearance intervals timeline
                 FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    person.appearanceSegments.forEachIndexed { idx, segment ->
+                    person.appearanceSegments.take(4).forEach { segment ->
+                        val startSec = segment.startMs / 1000f
+                        val endSec = segment.endMs / 1000f
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(PureBlack)
-                                .border(0.5.dp, CardBorder, RoundedCornerShape(4.dp))
+                                .background(ElevatedSurface)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "#${idx + 1}: ${segment.startMs / 1000f}s–${segment.endMs / 1000f}s",
+                                text = "${String.format("%.1f", startSec)}s - ${String.format("%.1f", endSec)}s",
                                 fontSize = 10.sp,
-                                color = TextMuted
+                                color = TextSecondary
                             )
                         }
+                    }
+                    if (person.appearanceSegments.size > 4) {
+                        Text(
+                            text = "+${person.appearanceSegments.size - 4} more",
+                            fontSize = 10.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
                     }
                 }
             }

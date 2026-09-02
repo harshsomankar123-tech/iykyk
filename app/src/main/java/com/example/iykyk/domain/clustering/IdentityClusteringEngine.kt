@@ -33,101 +33,158 @@ data class PersonCluster(
     }
 }
 
+/**
+ * A continuous video shot (tracklet) of a single person.
+ */
+private data class FaceTracklet(
+    val detections: MutableList<FaceDetectionResult> = mutableListOf(),
+    var representativeEmbedding: FloatArray? = null
+) {
+    fun updateRepresentative() {
+        val topDetections = detections
+            .filter { it.embedding != null }
+            .sortedByDescending { it.sharpnessScore }
+            .take(4)
+
+        if (topDetections.isEmpty()) return
+        val embs = topDetections.mapNotNull { it.embedding }
+        val dim = embs[0].size
+        val sum = FloatArray(dim)
+        for (e in embs) {
+            for (i in 0 until dim) {
+                sum[i] += e[i]
+            }
+        }
+        representativeEmbedding = FaceEmbeddingEngine.l2Normalize(sum)
+    }
+}
+
 class IdentityClusteringEngine(
-    val maxCosineDistanceThreshold: Float = 0.35f, // D_cos <= 0.35 (Similarity >= 0.65)
-    val appearanceBreakGapMs: Long = 1200L,        // 1.2s break threshold for distinct appearances
-    val minDetectionsPerPerson: Int = 1            // Discard single spurious noise detections if needed
+    val maxCosineDistanceThreshold: Float = 0.52f, // 0.52 unites cross-scene appearances across different angles
+    val appearanceBreakGapMs: Long = 1200L,
+    val minDetectionsPerPerson: Int = 2
 ) {
 
     /**
-     * Performs two-tier tracking & clustering:
-     * Tier 1: Local frame-to-frame spatial + feature tracking into continuous tracklets.
-     * Tier 2: Global Hierarchical Agglomerative / Centroid Clustering across the full video.
+     * Performs identity clustering using:
+     * 1. Temporal Tracklet Formation (groups continuous video shots of a person)
+     * 2. Representative Embedding extraction (averages sharpest shots in each tracklet)
+     * 3. Co-occurrence constrained Agglomerative Hierarchical Clustering
      */
     fun clusterFaces(allDetections: List<FaceDetectionResult>): List<PersonCluster> {
         if (allDetections.isEmpty()) return emptyList()
 
-        // 1. Sort detections chronologically by timestamp
         val sortedDetections = allDetections.sortedBy { it.frameTimestampMs }
 
-        // 2. Global Centroid / Leader-Follower Clustering with Average-Linkage Update
-        val clusters = mutableListOf<PersonCluster>()
-        var clusterIdCounter = 1
+        // Step 1: Form temporal tracklets (continuous appearance shots)
+        val tracklets = mutableListOf<FaceTracklet>()
 
         for (detection in sortedDetections) {
-            val emb = detection.embedding
-            if (emb == null) continue
+            val emb = detection.embedding ?: continue
 
-            var bestCluster: PersonCluster? = null
-            var minDistance = Float.MAX_VALUE
+            var bestTracklet: FaceTracklet? = null
+            var minTrackletDist = Float.MAX_VALUE
 
-            for (cluster in clusters) {
-                val centroid = cluster.centroidEmbedding ?: continue
-                val dist = FaceEmbeddingEngine.cosineDistance(emb, centroid)
-                if (dist < minDistance && dist <= maxCosineDistanceThreshold) {
-                    minDistance = dist
-                    bestCluster = cluster
-                }
-            }
+            for (tracklet in tracklets) {
+                val lastDet = tracklet.detections.lastOrNull() ?: continue
+                val timeDiff = detection.frameTimestampMs - lastDet.frameTimestampMs
 
-            if (bestCluster != null) {
-                bestCluster.detections.add(detection)
-                bestCluster.updateCentroid()
-            } else {
-                val newCluster = PersonCluster(
-                    id = clusterIdCounter++,
-                    detections = mutableListOf(detection)
-                )
-                newCluster.updateCentroid()
-                clusters.add(newCluster)
-            }
-        }
-
-        // 3. Hierarchical Agglomerative Merge step for any clusters closer than threshold
-        mergeCloseClusters(clusters)
-
-        return clusters.filter { it.detections.size >= minDetectionsPerPerson }
-    }
-
-    /**
-     * Agglomerative merge step: Recursively merges any two clusters whose centroids
-     * have a cosine distance <= maxCosineDistanceThreshold.
-     */
-    private fun mergeCloseClusters(clusters: MutableList<PersonCluster>) {
-        var merged = true
-        while (merged) {
-            merged = false
-            var mergeI = -1
-            var mergeJ = -1
-            var minPairDist = Float.MAX_VALUE
-
-            for (i in 0 until clusters.size) {
-                val c1 = clusters[i].centroidEmbedding ?: continue
-                for (j in i + 1 until clusters.size) {
-                    val c2 = clusters[j].centroidEmbedding ?: continue
-                    val dist = FaceEmbeddingEngine.cosineDistance(c1, c2)
-                    if (dist <= maxCosineDistanceThreshold && dist < minPairDist) {
-                        minPairDist = dist
-                        mergeI = i
-                        mergeJ = j
+                // Must be continuous in time (< appearanceBreakGapMs) and not in the same frame
+                if (timeDiff in 1..appearanceBreakGapMs) {
+                    val rep = tracklet.representativeEmbedding ?: lastDet.embedding ?: continue
+                    val dist = FaceEmbeddingEngine.cosineDistance(emb, rep)
+                    // Threshold for continuous tracking in same scene (< 0.42)
+                    if (dist < 0.42f && dist < minTrackletDist) {
+                        minTrackletDist = dist
+                        bestTracklet = tracklet
                     }
                 }
             }
 
-            if (mergeI != -1 && mergeJ != -1) {
-                val clusterA = clusters[mergeI]
-                val clusterB = clusters[mergeJ]
-                clusterA.detections.addAll(clusterB.detections)
-                clusterA.updateCentroid()
-                clusters.removeAt(mergeJ)
+            if (bestTracklet != null) {
+                bestTracklet.detections.add(detection)
+                bestTracklet.updateRepresentative()
+            } else {
+                val newTracklet = FaceTracklet(mutableListOf(detection))
+                newTracklet.updateRepresentative()
+                tracklets.add(newTracklet)
+            }
+        }
+
+        // Step 2: Filter out isolated 1-frame camera transition flashes (e.g. 6.5s-6.5s)
+        // Genuine appearances of real people last at least 2 consecutive frames (>= 400ms)
+        val validTracklets = tracklets.filter { it.detections.size >= 2 }
+        val effectiveTracklets = if (validTracklets.isNotEmpty()) validTracklets else tracklets
+
+        // Step 3: Initialize 1 cluster per tracklet
+        val clusters = effectiveTracklets.mapIndexed { idx, tracklet ->
+            val cluster = PersonCluster(
+                id = idx + 1,
+                detections = tracklet.detections
+            )
+            cluster.centroidEmbedding = tracklet.representativeEmbedding
+            cluster
+        }.toMutableList()
+
+        // Step 3: Agglomeratively merge tracklet clusters of the same identity
+        var merged = true
+        while (merged) {
+            merged = false
+            var bestI = -1
+            var bestJ = -1
+            var minDistance = Float.MAX_VALUE
+
+            for (i in 0 until clusters.size) {
+                val timestampsA = clusters[i].detections.map { it.frameTimestampMs }.toSet()
+
+                for (j in i + 1 until clusters.size) {
+                    // Co-occurrence constraint: people appearing at the exact same time cannot merge!
+                    val hasCoOccurrence = clusters[j].detections.any { timestampsA.contains(it.frameTimestampMs) }
+                    if (hasCoOccurrence) continue
+
+                    val c1 = clusters[i].centroidEmbedding ?: continue
+                    val c2 = clusters[j].centroidEmbedding ?: continue
+                    val dist = FaceEmbeddingEngine.cosineDistance(c1, c2)
+
+                    if (dist <= maxCosineDistanceThreshold && dist < minDistance) {
+                        minDistance = dist
+                        bestI = i
+                        bestJ = j
+                    }
+                }
+            }
+
+            if (bestI != -1 && bestJ != -1) {
+                clusters[bestI].detections.addAll(clusters[bestJ].detections)
+                clusters[bestI].updateCentroid()
+                clusters.removeAt(bestJ)
                 merged = true
             }
+        }
+
+        // Filter out fleeting noise and split-screen seam glitches:
+        // Genuine characters appear in multiple scenes (segments >= 2) OR have sustained screen time (>= 4 detections)
+        val filtered = clusters.filter { cluster ->
+            val segments = computeAppearanceSegments(cluster.detections)
+            segments.size >= 2 || cluster.detections.size >= 4
+        }
+        val result = if (filtered.isNotEmpty()) filtered else clusters
+
+        // Sort by prominence (number of appearances / detections descending)
+        val sortedResult = result.sortedByDescending { it.detections.size }
+
+        // Re-index cleanly 1 to N
+        return sortedResult.mapIndexed { index, cluster ->
+            PersonCluster(
+                id = index + 1,
+                detections = cluster.detections,
+                centroidEmbedding = cluster.centroidEmbedding
+            )
         }
     }
 
     /**
-     * Computes the continuous appearance segments for a given person.
-     * An appearance segment ends whenever the person is absent/occluded for > appearanceBreakGapMs.
+     * Computes continuous appearance segments for a person.
      */
     fun computeAppearanceSegments(detections: List<FaceDetectionResult>): List<AppearanceSegment> {
         if (detections.isEmpty()) return emptyList()
@@ -144,7 +201,6 @@ class IdentityClusteringEngine(
             val gap = ts - currentEnd
 
             if (gap > appearanceBreakGapMs) {
-                // Gap exceeded threshold -> complete current appearance segment
                 segments.add(
                     AppearanceSegment(
                         startMs = currentStart,
@@ -152,18 +208,15 @@ class IdentityClusteringEngine(
                         detectionCount = currentCount
                     )
                 )
-                // Start a new segment
                 currentStart = ts
                 currentEnd = ts
                 currentCount = 1
             } else {
-                // Extend current segment
                 currentEnd = ts
                 currentCount++
             }
         }
 
-        // Add final open segment
         segments.add(
             AppearanceSegment(
                 startMs = currentStart,
@@ -176,9 +229,6 @@ class IdentityClusteringEngine(
     }
 
     companion object {
-        /**
-         * Calculates Intersection-over-Union (IoU) between two bounding boxes.
-         */
         fun calculateIoU(a: Rect, b: Rect): Float {
             val interLeft = max(a.left, b.left)
             val interTop = max(a.top, b.top)

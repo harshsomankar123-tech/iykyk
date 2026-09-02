@@ -18,7 +18,8 @@ import kotlin.math.sqrt
 
 /**
  * On-device Face Embedding Engine powered by MobileFaceNet TFLite.
- * Lazy-initialized on first use (off main thread) to prevent ANR.
+ * Adapts natively to model tensor input batch sizes (e.g. 1 or 2) and output dimensions (e.g. 192-d),
+ * running pure on-device inference without resizing crashes.
  */
 class FaceEmbeddingEngine(
     private val context: Context,
@@ -26,6 +27,8 @@ class FaceEmbeddingEngine(
 ) {
     private val TAG = "FaceEmbeddingEngine"
     private var interpreter: Interpreter? = null
+    var batchSize = 1
+        private set
     var inputSize = 112
         private set
     var embeddingDim = 192
@@ -33,7 +36,7 @@ class FaceEmbeddingEngine(
     private var initialized = false
 
     /**
-     * Lazy initialization - called on background thread on first embedding request.
+     * Lazy initialization on background thread.
      */
     @Synchronized
     private fun ensureInitialized() {
@@ -51,29 +54,22 @@ class FaceEmbeddingEngine(
             }
             val interp = Interpreter(modelBuffer, options)
 
-            // Read the model's native input shape
+            // Read model's native input and output tensor shapes
             val inShape = interp.getInputTensor(0).shape()
+            val outShape = interp.getOutputTensor(0).shape()
+
+            if (inShape.isNotEmpty() && inShape[0] > 0) {
+                batchSize = inShape[0]
+            }
             if (inShape.size >= 3 && inShape[1] > 0) {
                 inputSize = inShape[1]
             }
-
-            // Force batch size = 1 (some MobileFaceNet models default to batch=2)
-            try {
-                val singleBatchShape = intArrayOf(1, inputSize, inputSize, 3)
-                interp.resizeInput(0, singleBatchShape)
-                interp.allocateTensors()
-            } catch (e: Exception) {
-                Log.w(TAG, "resizeInput failed, using model defaults: ${e.message}")
-            }
-
-            // Read output shape
-            val outShape = interp.getOutputTensor(0).shape()
             if (outShape.isNotEmpty()) {
                 embeddingDim = outShape[outShape.size - 1]
             }
 
             interpreter = interp
-            Log.i(TAG, "MobileFaceNet OK: ${inputSize}x${inputSize} -> ${embeddingDim}-d")
+            Log.i(TAG, "MobileFaceNet loaded successfully: BatchSize=$batchSize, InputSize=${inputSize}x${inputSize}, EmbeddingDim=$embeddingDim")
         } catch (e: Exception) {
             Log.e(TAG, "Model init failed: ${e.message}", e)
             interpreter = null
@@ -112,7 +108,6 @@ class FaceEmbeddingEngine(
             if (interp != null) {
                 runInference(interp, resized)
             } else {
-                // Fallback: deterministic spatial descriptor (never silent - logged above)
                 generateSpatialDescriptor(resized)
             }
         } catch (e: Exception) {
@@ -128,7 +123,10 @@ class FaceEmbeddingEngine(
     }
 
     private fun runInference(interp: Interpreter, bitmap: Bitmap): FloatArray {
-        val byteBuffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4).apply {
+        // Allocate direct ByteBuffer matching model's exact tensor requirement:
+        // [batchSize, inputSize, inputSize, 3 channels] * 4 bytes/float
+        val totalBytes = batchSize * inputSize * inputSize * 3 * 4
+        val byteBuffer = ByteBuffer.allocateDirect(totalBytes).apply {
             order(ByteOrder.nativeOrder())
             rewind()
         }
@@ -136,26 +134,25 @@ class FaceEmbeddingEngine(
         val intValues = IntArray(inputSize * inputSize)
         bitmap.getPixels(intValues, 0, inputSize, 0, 0, inputSize, inputSize)
 
-        for (pixel in intValues) {
-            val r = ((pixel shr 16) and 0xFF)
-            val g = ((pixel shr 8) and 0xFF)
-            val b = (pixel and 0xFF)
-            byteBuffer.putFloat((r - 127.5f) / 128.0f)
-            byteBuffer.putFloat((g - 127.5f) / 128.0f)
-            byteBuffer.putFloat((b - 127.5f) / 128.0f)
+        // Populate all batch slots with normalized image [-1.0, 1.0]
+        for (b in 0 until batchSize) {
+            for (pixel in intValues) {
+                val red = ((pixel shr 16) and 0xFF)
+                val green = ((pixel shr 8) and 0xFF)
+                val blue = (pixel and 0xFF)
+                byteBuffer.putFloat((red - 127.5f) / 128.0f)
+                byteBuffer.putFloat((green - 127.5f) / 128.0f)
+                byteBuffer.putFloat((blue - 127.5f) / 128.0f)
+            }
         }
 
-        val output = Array(1) { FloatArray(embeddingDim) }
+        val output = Array(batchSize) { FloatArray(embeddingDim) }
         interp.run(byteBuffer, output)
         return output[0]
     }
 
-    /**
-     * Deterministic multi-region spatial descriptor as emergency fallback.
-     * Divides face crop into a grid and computes mean color + gradient features.
-     */
     private fun generateSpatialDescriptor(bitmap: Bitmap): FloatArray {
-        Log.w(TAG, "Using fallback spatial descriptor (model not available)")
+        Log.w(TAG, "Using fallback spatial descriptor")
         val vec = FloatArray(embeddingDim)
         val w = bitmap.width
         val h = bitmap.height
@@ -180,7 +177,8 @@ class FaceEmbeddingEngine(
     fun extractFaceCrop(
         frameBitmap: Bitmap,
         faceBox: Rect,
-        marginRatio: Float = 0.20f
+        marginRatio: Float = 0.20f,
+        rollAngle: Float = 0f
     ): Bitmap {
         val faceW = max(1, faceBox.right - faceBox.left)
         val faceH = max(1, faceBox.bottom - faceBox.top)
@@ -195,7 +193,16 @@ class FaceEmbeddingEngine(
         val cropWidth = max(1, right - left)
         val cropHeight = max(1, bottom - top)
 
-        return Bitmap.createBitmap(frameBitmap, left, top, cropWidth, cropHeight)
+        val rawCrop = Bitmap.createBitmap(frameBitmap, left, top, cropWidth, cropHeight)
+        if (Math.abs(rollAngle) > 4.0f) {
+            val matrix = android.graphics.Matrix().apply {
+                postRotate(-rollAngle)
+            }
+            val alignedCrop = Bitmap.createBitmap(rawCrop, 0, 0, rawCrop.width, rawCrop.height, matrix, true)
+            rawCrop.recycle()
+            return alignedCrop
+        }
+        return rawCrop
     }
 
     companion object {

@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -61,12 +62,32 @@ fun VideoPickerScreen(
     uiState: CollageUiState,
     onVideoSelected: (Uri) -> Unit,
     onStartProcessing: () -> Unit,
-    onViewResults: () -> Unit
+    onViewResults: () -> Unit,
+    onClearVideo: () -> Unit
 ) {
-    val videoPickerLauncher = rememberLauncherForActivityResult(
+    val getContentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { onVideoSelected(it) }
+    }
+
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         uri?.let { onVideoSelected(it) }
+    }
+
+    val launchPicker = {
+        try {
+            pickVisualMediaLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+            )
+        } catch (_: Exception) {
+            // Fallback for Android 15 emulators / devices without Google PhotoPicker
+            try {
+                getContentLauncher.launch("video/*")
+            } catch (_: Exception) {}
+        }
     }
 
     Surface(
@@ -104,62 +125,83 @@ fun VideoPickerScreen(
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // Minimalist Video Picker Card (Uses Privacy-Preserving System Photo/Video Picker)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(
-                        width = 1.dp,
-                        color = if (uiState.selectedVideoUri != null) PureWhite else CardBorder,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .clickable(enabled = !uiState.isProcessing) {
-                        videoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                        )
-                    },
-                colors = CardDefaults.cardColors(containerColor = DarkSurface)
-            ) {
-                Column(
+            // Minimalist Video Picker Card
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            width = 1.dp,
+                            color = if (uiState.selectedVideoUri != null) PureWhite else CardBorder,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable(enabled = !uiState.isProcessing) {
+                            launchPicker()
+                        },
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
                 ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(if (uiState.selectedVideoUri != null) PureWhite else ElevatedSurface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.selectedVideoUri != null) Icons.Default.CheckCircle else Icons.Default.VideoLibrary,
+                                contentDescription = "Pick Video",
+                                tint = if (uiState.selectedVideoUri != null) PureBlack else PureWhite,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = if (uiState.selectedVideoUri != null) "Video Selected" else "Choose Video from Device",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = PureWhite
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = uiState.selectedVideoUri?.lastPathSegment ?: "Tap to select from files",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Cross (X) button to clear video
+                if (uiState.selectedVideoUri != null && !uiState.isProcessing) {
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
-                            .background(if (uiState.selectedVideoUri != null) PureWhite else ElevatedSurface),
+                            .background(Color(0xFF333333))
+                            .clickable { onClearVideo() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (uiState.selectedVideoUri != null) Icons.Default.CheckCircle else Icons.Default.VideoLibrary,
-                            contentDescription = "Pick Video",
-                            tint = if (uiState.selectedVideoUri != null) PureBlack else PureWhite,
-                            modifier = Modifier.size(30.dp)
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear video",
+                            tint = PureWhite,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = if (uiState.selectedVideoUri != null) "Video Selected" else "Choose Video from Device",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = PureWhite
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = uiState.selectedVideoUri?.lastPathSegment ?: "Tap to select from files",
-                        fontSize = 13.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1
-                    )
                 }
             }
 

@@ -38,78 +38,68 @@ object CollageBitmapRenderer {
         val headerTop = 90f
         var currentY = headerTop
 
-        // Minimal App Tag (Pure White Border)
+        // Minimal App Tag Pill (Properly Spaced)
+        val tagHeight = 36f
+        val tagWidth = 190f
         val tagPaint = Paint().apply {
             color = Color.rgb(24, 24, 24)
             isAntiAlias = true
         }
         val tagBorderPaint = Paint().apply {
-            color = Color.rgb(60, 60, 60)
+            color = Color.rgb(65, 65, 65)
             style = Paint.Style.STROKE
             strokeWidth = 2f
             isAntiAlias = true
         }
-        val tagRect = RectF(60f, currentY, 260f, currentY + 40f)
-        canvas.drawRoundRect(tagRect, 8f, 8f, tagPaint)
-        canvas.drawRoundRect(tagRect, 8f, 8f, tagBorderPaint)
+        val tagRect = RectF(60f, currentY, 60f + tagWidth, currentY + tagHeight)
+        canvas.drawRoundRect(tagRect, 18f, 18f, tagPaint)
+        canvas.drawRoundRect(tagRect, 18f, 18f, tagBorderPaint)
 
         val tagTextPaint = Paint().apply {
-            color = Color.WHITE
-            textSize = 18f
+            color = Color.rgb(220, 220, 220)
+            textSize = 15f
             isFakeBoldText = true
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
-            letterSpacing = 0.1f
+            letterSpacing = 0.12f
         }
-        canvas.drawText("IYKYK COLLAGE", tagRect.centerX(), tagRect.centerY() + 6f, tagTextPaint)
+        canvas.drawText("IYKYK COLLAGE", tagRect.centerX(), tagRect.centerY() + 5f, tagTextPaint)
 
-        currentY += 70f
+        // Advance currentY past tag + generous margin + title font ascender
+        currentY = tagRect.bottom + 28f
 
-        // Title
+        // Title (baseline is at currentY + textSize)
+        val titleSize = 50f
         val titlePaint = Paint().apply {
             color = Color.WHITE
-            textSize = 52f
+            textSize = titleSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             isAntiAlias = true
             letterSpacing = -0.02f
         }
-        canvas.drawText(config.title.replace("✨", "").trim(), 60f, currentY, titlePaint)
-
-        currentY += 42f
+        val titleBaseline = currentY + titleSize * 0.85f
+        canvas.drawText(config.title.replace("✨", "").trim(), 60f, titleBaseline, titlePaint)
 
         // Subtitle
+        currentY = titleBaseline + 18f
         val subtitlePaint = Paint().apply {
-            color = Color.rgb(160, 160, 160)
-            textSize = 26f
+            color = Color.rgb(150, 150, 150)
+            textSize = 24f
             isAntiAlias = true
         }
         val countText = "${persons.size} Unique ${if (persons.size == 1) "Individual" else "Individuals"} Detected"
-        canvas.drawText(countText, 60f, currentY, subtitlePaint)
+        canvas.drawText(countText, 60f, currentY + 20f, subtitlePaint)
 
         currentY += 45f
 
         // 3. Grid Area
-        val gridTop = currentY
-        val gridBottom = height - 100f
+        val gridTop = currentY + 15f
+        val gridBottom = height - 50f
         val gridLeft = 60f
         val gridRight = width - 60f
 
         val gridBounds = RectF(gridLeft, gridTop, gridRight, gridBottom)
         renderPersonGrid(canvas, persons, gridBounds, config)
-
-        // 4. Footer Watermark
-        val footerPaint = Paint().apply {
-            color = Color.rgb(110, 110, 110)
-            textSize = 20f
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-        }
-        canvas.drawText(
-            "Processed On-Device • ML Kit + TFLite",
-            width / 2f,
-            height - 45f,
-            footerPaint
-        )
 
         return bitmap
     }
@@ -122,32 +112,42 @@ object CollageBitmapRenderer {
     ) {
         if (persons.isEmpty()) return
 
+        // Limit story grid to top 6 prominent characters so cards maintain generous proportions
+        val displayPersons = persons.take(6)
+        val count = displayPersons.size
         val spacing = 16f
-        val count = persons.size
 
         when {
             count == 1 -> {
-                drawPersonCard(canvas, persons[0], bounds, config)
+                val targetAspect = 0.75f // 3:4 portrait ratio
+                val maxCardH = bounds.height().coerceAtMost(1280f)
+                val cardW = (maxCardH * targetAspect).coerceAtMost(bounds.width())
+                val cardH = cardW / targetAspect
+
+                val left = bounds.centerX() - cardW / 2f
+                val top = bounds.top + 10f
+                val heroRect = RectF(left, top, left + cardW, top + cardH)
+                drawPersonCard(canvas, displayPersons[0], heroRect, config)
             }
             count == 2 -> {
                 val cardH = (bounds.height() - spacing) / 2f
                 val card1 = RectF(bounds.left, bounds.top, bounds.right, bounds.top + cardH)
                 val card2 = RectF(bounds.left, bounds.top + cardH + spacing, bounds.right, bounds.bottom)
-                drawPersonCard(canvas, persons[0], card1, config)
-                drawPersonCard(canvas, persons[1], card2, config)
+                drawPersonCard(canvas, displayPersons[0], card1, config)
+                drawPersonCard(canvas, displayPersons[1], card2, config)
             }
             count == 3 -> {
                 val heroH = bounds.height() * 0.52f
                 val heroRect = RectF(bounds.left, bounds.top, bounds.right, bounds.top + heroH)
-                drawPersonCard(canvas, persons[0], heroRect, config)
+                drawPersonCard(canvas, displayPersons[0], heroRect, config)
 
                 val bottomTop = bounds.top + heroH + spacing
                 val bottomH = bounds.bottom - bottomTop
                 val bottomW = (bounds.width() - spacing) / 2f
                 val card2 = RectF(bounds.left, bottomTop, bounds.left + bottomW, bottomTop + bottomH)
                 val card3 = RectF(bounds.left + bottomW + spacing, bottomTop, bounds.right, bottomTop + bottomH)
-                drawPersonCard(canvas, persons[1], card2, config)
-                drawPersonCard(canvas, persons[2], card3, config)
+                drawPersonCard(canvas, displayPersons[1], card2, config)
+                drawPersonCard(canvas, displayPersons[2], card3, config)
             }
             count == 4 -> {
                 val cardW = (bounds.width() - spacing) / 2f
@@ -158,16 +158,16 @@ object CollageBitmapRenderer {
                     val left = bounds.left + col * (cardW + spacing)
                     val top = bounds.top + row * (cardH + spacing)
                     val cardRect = RectF(left, top, left + cardW, top + cardH)
-                    drawPersonCard(canvas, persons[i], cardRect, config)
+                    drawPersonCard(canvas, displayPersons[i], cardRect, config)
                 }
             }
             count == 5 -> {
-                val topH = (bounds.height() - spacing) * 0.52f
+                val topH = (bounds.height() - spacing) * 0.50f
                 val topW = (bounds.width() - spacing) / 2f
                 val card1 = RectF(bounds.left, bounds.top, bounds.left + topW, bounds.top + topH)
                 val card2 = RectF(bounds.left + topW + spacing, bounds.top, bounds.right, bounds.top + topH)
-                drawPersonCard(canvas, persons[0], card1, config)
-                drawPersonCard(canvas, persons[1], card2, config)
+                drawPersonCard(canvas, displayPersons[0], card1, config)
+                drawPersonCard(canvas, displayPersons[1], card2, config)
 
                 val botTop = bounds.top + topH + spacing
                 val botH = bounds.bottom - botTop
@@ -175,21 +175,22 @@ object CollageBitmapRenderer {
                 for (j in 0 until 3) {
                     val left = bounds.left + j * (botW + spacing)
                     val cardRect = RectF(left, botTop, left + botW, botTop + botH)
-                    drawPersonCard(canvas, persons[j + 2], cardRect, config)
+                    drawPersonCard(canvas, displayPersons[j + 2], cardRect, config)
                 }
             }
             else -> {
+                // 6 characters: 3 rows x 2 columns (cards are ~450px tall, clear and detailed)
                 val cols = 2
-                val rows = (count + 1) / 2
+                val rows = 3
                 val cardW = (bounds.width() - spacing) / cols
-                val cardH = (bounds.height() - ((rows - 1) * spacing)) / rows
-                for (i in persons.indices) {
+                val cardH = (bounds.height() - (2 * spacing)) / rows
+                for (i in 0 until 6) {
                     val r = i / cols
                     val c = i % cols
                     val left = bounds.left + c * (cardW + spacing)
                     val top = bounds.top + r * (cardH + spacing)
                     val cardRect = RectF(left, top, left + cardW, top + cardH)
-                    drawPersonCard(canvas, persons[i], cardRect, config)
+                    drawPersonCard(canvas, displayPersons[i], cardRect, config)
                 }
             }
         }
@@ -218,21 +219,6 @@ object CollageBitmapRenderer {
             roundedBmp.recycle()
         }
 
-        // Gradient legibility overlay at bottom
-        val overlayPaint = Paint().apply {
-            shader = LinearGradient(
-                rect.left, rect.bottom - 130f,
-                rect.left, rect.bottom,
-                Color.TRANSPARENT,
-                Color.argb(230, 0, 0, 0),
-                Shader.TileMode.CLAMP
-            )
-        }
-        canvas.drawRoundRect(
-            RectF(rect.left, rect.bottom - 130f, rect.right, rect.bottom),
-            radius, radius, overlayPaint
-        )
-
         // Clean crisp border
         val strokePaint = Paint().apply {
             color = Color.rgb(45, 45, 45)
@@ -242,17 +228,31 @@ object CollageBitmapRenderer {
         }
         canvas.drawRoundRect(rect, radius, radius, strokePaint)
 
-        // Person Name Label (Bottom Left)
-        val namePaint = Paint().apply {
-            color = Color.WHITE
-            textSize = if (rect.width() < 300f) 22f else 26f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            isAntiAlias = true
-        }
-        canvas.drawText(person.displayName, rect.left + 18f, rect.bottom - 20f, namePaint)
-
-        // Appearance Badge (Top Right)
+        // Text labels and badges (only shown when showAppearanceBadges is enabled)
         if (config.showAppearanceBadges) {
+            // Gradient legibility overlay at bottom
+            val overlayPaint = Paint().apply {
+                shader = LinearGradient(
+                    rect.left, rect.bottom - 130f,
+                    rect.left, rect.bottom,
+                    Color.TRANSPARENT,
+                    Color.argb(230, 0, 0, 0),
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRoundRect(
+                RectF(rect.left, rect.bottom - 130f, rect.right, rect.bottom),
+                radius, radius, overlayPaint
+            )
+
+            // Person Name Label (Bottom Left)
+            val namePaint = Paint().apply {
+                color = Color.WHITE
+                textSize = if (rect.width() < 300f) 22f else 26f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+            }
+            canvas.drawText(person.displayName, rect.left + 18f, rect.bottom - 20f, namePaint)
             val badgeText = "${person.totalAppearances} ${if (person.totalAppearances == 1) "appearance" else "appearances"}"
             val badgeTextPaint = Paint().apply {
                 color = Color.WHITE

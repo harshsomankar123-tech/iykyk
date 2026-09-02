@@ -13,7 +13,7 @@ import java.util.UUID
 class IdentityClusteringEngineTest {
 
     private val clusteringEngine = IdentityClusteringEngine(
-        maxCosineDistanceThreshold = 0.35f,
+        maxCosineDistanceThreshold = 0.52f,
         appearanceBreakGapMs = 1200L
     )
 
