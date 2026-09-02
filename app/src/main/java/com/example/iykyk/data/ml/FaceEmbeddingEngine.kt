@@ -20,8 +20,8 @@ class FaceEmbeddingEngine(
     private val modelAssetPath: String = "models/mobilefacenet.tflite"
 ) {
     private var interpreter: Interpreter? = null
-    private val inputSize = 112 // Standard MobileFaceNet input: 112x112 RGB
-    private val embeddingDim = 192 // Standard MobileFaceNet output feature dimension
+    private var inputSize = 112 // Adaptive input size (e.g. 112x112)
+    private var embeddingDim = 192 // Adaptive output feature dimension (e.g. 128, 192, 512)
 
     init {
         initInterpreter()
@@ -35,10 +35,19 @@ class FaceEmbeddingEngine(
                 val options = Interpreter.Options().apply {
                     setNumThreads(4)
                 }
-                interpreter = Interpreter(modelBuffer, options)
+                val interp = Interpreter(modelBuffer, options)
+                val outShape = interp.getOutputTensor(0).shape()
+                if (outShape.isNotEmpty()) {
+                    embeddingDim = outShape[outShape.size - 1]
+                }
+                val inShape = interp.getInputTensor(0).shape()
+                if (inShape.size >= 3 && inShape[1] > 0) {
+                    inputSize = inShape[1]
+                }
+                interpreter = interp
             }
         } catch (e: Exception) {
-            // Model file will be created or fallback embedding engine will activate
+            // Model file fallback will activate
             interpreter = null
         }
     }
