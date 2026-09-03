@@ -28,7 +28,7 @@ sealed class PipelineState {
 
 class VideoProcessingPipeline(
     private val context: Context,
-    private val targetFps: Float = 4.0f,
+    private val targetFps: Float = 5.0f, // 5 FPS (top of the 3–5 spec range): more frames = more chances to catch a face in a detectable pose
     private val maxCosineDistance: Float = 0.52f, // 0.52 unites cross-scene appearances
     private val appearanceBreakMs: Long = 1200L
 ) {
@@ -40,9 +40,10 @@ class VideoProcessingPipeline(
     private val maxFrameDimension = 1080
 
     /**
-     * Executes an asynchronous, streaming video pipeline with low memory footprint (<30MB).
-     * Decodes frames one-by-one, extracts embeddings, generates portrait thumbnails,
-     * and immediately recycles full frame bitmaps to prevent OOM errors on long/4K videos.
+     * Executes an asynchronous, streaming video pipeline with a flat frame-decode footprint.
+     * Decodes frames one-by-one, extracts embeddings, generates portrait thumbnails, and
+     * immediately recycles each full frame bitmap to prevent OOM on long/4K videos. After
+     * clustering, every crop except the chosen best shot per person is recycled too.
      */
     fun processVideo(videoUri: Uri): Flow<PipelineState> = flow {
         val retriever = MediaMetadataRetriever()
@@ -132,7 +133,7 @@ class VideoProcessingPipeline(
                         allDetections.add(detection)
                     }
 
-                    // 3. Immediately recycle frame bitmap to keep memory footprint flat (<30MB)
+                    // 3. Immediately recycle the full frame bitmap so decode memory stays flat
                     frameBitmap.recycle()
                     frameCount++
                 }
@@ -199,6 +200,15 @@ class VideoProcessingPipeline(
                         compositeQualityScore = bestShot.qualityScore
                     )
                 )
+
+                // Free memory: only the best shot's portrait is rendered in the collage,
+                // so recycle every other retained crop instead of holding them all until GC.
+                for (detection in cluster.detections) {
+                    if (detection !== bestShot) {
+                        detection.portraitCrop?.recycle()
+                        detection.portraitCrop = null
+                    }
+                }
             }
 
             // Order by most prominent appearance count descending

@@ -4,6 +4,7 @@ import android.graphics.Rect
 import com.example.iykyk.data.ml.FaceEmbeddingEngine
 import com.example.iykyk.domain.clustering.IdentityClusteringEngine
 import com.example.iykyk.domain.model.FaceDetectionResult
+import com.example.iykyk.domain.util.BoxGeometry
 import com.example.iykyk.testutil.TestFixtures
 import com.example.iykyk.testutil.TestFixtures.createRect
 import com.google.common.truth.Truth.assertThat
@@ -40,13 +41,13 @@ class IdentityClusteringEngineTest {
         val boxD = createRect(200, 200, 300, 300)
 
         // 100% overlap
-        assertThat(IdentityClusteringEngine.calculateIoU(boxA, boxB)).isWithin(1e-5f).of(1.0f)
+        assertThat(BoxGeometry.iou(boxA, boxB)).isWithin(1e-5f).of(1.0f)
 
         // 50% width overlap (Area A=10000, Area C=10000, Inter=5000, Union=15000 -> 0.333)
-        assertThat(IdentityClusteringEngine.calculateIoU(boxA, boxC)).isWithin(1e-2f).of(0.333f)
+        assertThat(BoxGeometry.iou(boxA, boxC)).isWithin(1e-2f).of(0.333f)
 
         // 0% overlap
-        assertThat(IdentityClusteringEngine.calculateIoU(boxA, boxD)).isWithin(1e-5f).of(0.0f)
+        assertThat(BoxGeometry.iou(boxA, boxD)).isWithin(1e-5f).of(0.0f)
     }
 
     @Test

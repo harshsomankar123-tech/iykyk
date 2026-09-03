@@ -1,11 +1,8 @@
 package com.example.iykyk.domain.clustering
 
-import android.graphics.Rect
 import com.example.iykyk.data.ml.FaceEmbeddingEngine
 import com.example.iykyk.domain.model.AppearanceSegment
 import com.example.iykyk.domain.model.FaceDetectionResult
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Cluster containing all face detections belonging to a single unique identity.
@@ -61,8 +58,7 @@ private data class FaceTracklet(
 
 class IdentityClusteringEngine(
     val maxCosineDistanceThreshold: Float = 0.52f, // 0.52 unites cross-scene appearances across different angles
-    val appearanceBreakGapMs: Long = 1200L,
-    val minDetectionsPerPerson: Int = 2
+    val appearanceBreakGapMs: Long = 1200L
 ) {
 
     /**
@@ -162,11 +158,12 @@ class IdentityClusteringEngine(
             }
         }
 
-        // Filter out fleeting noise and split-screen seam glitches:
-        // Genuine characters appear in multiple scenes (segments >= 2) OR have sustained screen time (>= 4 detections)
+        // Filter out fleeting noise and split-screen seam glitches (the seam phantom is already
+        // removed at detection time, so this is a light secondary net):
+        // keep anyone who appears in multiple scenes (segments >= 2) OR for >= 3 frames.
         val filtered = clusters.filter { cluster ->
             val segments = computeAppearanceSegments(cluster.detections)
-            segments.size >= 2 || cluster.detections.size >= 4
+            segments.size >= 2 || cluster.detections.size >= 3
         }
         val result = if (filtered.isNotEmpty()) filtered else clusters
 
@@ -226,25 +223,5 @@ class IdentityClusteringEngine(
         )
 
         return segments
-    }
-
-    companion object {
-        fun calculateIoU(a: Rect, b: Rect): Float {
-            val interLeft = max(a.left, b.left)
-            val interTop = max(a.top, b.top)
-            val interRight = min(a.right, b.right)
-            val interBottom = min(a.bottom, b.bottom)
-
-            val interWidth = max(0, interRight - interLeft)
-            val interHeight = max(0, interBottom - interTop)
-            val interArea = interWidth * interHeight
-
-            val areaA = max(0, a.right - a.left) * max(0, a.bottom - a.top)
-            val areaB = max(0, b.right - b.left) * max(0, b.bottom - b.top)
-            val unionArea = areaA + areaB - interArea
-
-            if (unionArea <= 0) return 0f
-            return interArea.toFloat() / unionArea.toFloat()
-        }
     }
 }

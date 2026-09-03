@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import com.example.iykyk.domain.model.FaceDetectionResult
+import com.example.iykyk.domain.util.BoxGeometry
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -97,38 +98,25 @@ class FaceDetectorEngine {
         val sorted = detections.sortedByDescending { it.sharpnessScore }
         val result = mutableListOf<FaceDetectionResult>()
         for (det in sorted) {
-            val hasOverlap = result.any { calculateBoxIoU(it.boundingBox, det.boundingBox) > iouThreshold }
+            val hasOverlap = result.any { BoxGeometry.iou(it.boundingBox, det.boundingBox) > iouThreshold }
             if (!hasOverlap) {
                 result.add(det)
             }
         }
-        // Discard any phantom bounding box that straddles across two other detected faces (e.g. split-screen seam artifact)
+        // Discard only a genuine phantom box that is WIDER than its neighbours and straddles a real
+        // face on both sides (split-screen seam artifact). A real middle person in a group is about
+        // the same width as their neighbours, so the width guard prevents dropping an actual face.
         if (result.size >= 3) {
             val nonBridging = result.filterNot { candidate ->
                 val candBox = candidate.boundingBox
-                val hasFaceToLeft = result.any { other -> other != candidate && other.boundingBox.centerX() < candBox.left && calculateBoxIoU(other.boundingBox, candBox) > 0.05f }
-                val hasFaceToRight = result.any { other -> other != candidate && other.boundingBox.centerX() > candBox.right && calculateBoxIoU(other.boundingBox, candBox) > 0.05f }
+                val hasFaceToLeft = result.any { other -> other != candidate && other.boundingBox.centerX() < candBox.left && candBox.width() > other.boundingBox.width() && BoxGeometry.iou(other.boundingBox, candBox) > 0.05f }
+                val hasFaceToRight = result.any { other -> other != candidate && other.boundingBox.centerX() > candBox.right && candBox.width() > other.boundingBox.width() && BoxGeometry.iou(other.boundingBox, candBox) > 0.05f }
                 hasFaceToLeft && hasFaceToRight
             }
             return if (nonBridging.isNotEmpty()) nonBridging else result
         }
 
         return result
-    }
-
-    private fun calculateBoxIoU(a: Rect, b: Rect): Float {
-        val interLeft = max(a.left, b.left)
-        val interTop = max(a.top, b.top)
-        val interRight = min(a.right, b.right)
-        val interBottom = min(a.bottom, b.bottom)
-        val interW = max(0, interRight - interLeft)
-        val interH = max(0, interBottom - interTop)
-        val interArea = interW * interH
-        val areaA = max(0, a.right - a.left) * max(0, a.bottom - a.top)
-        val areaB = max(0, b.right - b.left) * max(0, b.bottom - b.top)
-        val unionArea = areaA + areaB - interArea
-        if (unionArea <= 0) return 0f
-        return interArea.toFloat() / unionArea.toFloat()
     }
 
     /**
