@@ -14,7 +14,7 @@ import java.util.UUID
 class IdentityClusteringEngineTest {
 
     private val clusteringEngine = IdentityClusteringEngine(
-        maxCosineDistanceThreshold = 0.52f,
+        maxCosineDistanceThreshold = 0.48f,
         appearanceBreakGapMs = 1200L
     )
 

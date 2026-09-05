@@ -57,7 +57,10 @@ class BestShotSelector(
      */
     fun selectBestDetection(candidates: List<FaceDetectionResult>): FaceDetectionResult? {
         if (candidates.isEmpty()) return null
-        return candidates.maxByOrNull { evaluateQualityScore(it) }
+        // If qualityScore was already populated (with solo-shot priority bonus), respect it; otherwise evaluate
+        return candidates.maxByOrNull {
+            if (it.qualityScore > 0f) it.qualityScore else evaluateQualityScore(it)
+        }
     }
 
     /**
@@ -93,9 +96,12 @@ class BestShotSelector(
         var right = (centerX + cropWidth / 2f).toInt()
         var bottom = (adjustedCenterY + cropHeight / 2f).toInt()
 
-        // Split-screen seam constraint: if multiple faces are present, never cross the center line
-        if (otherFaceBoxes.size >= 2) {
-            val halfW = fw / 2
+        // Split-screen seam constraint: if a face is on one side of the screen, never let the crop cross the center line
+        val halfW = fw / 2
+        val isLeftSide = faceBox.right < halfW + (fw * 0.05f) && centerX < halfW
+        val isRightSide = faceBox.left > halfW - (fw * 0.05f) && centerX > halfW
+
+        if (otherFaceBoxes.size >= 2 || isLeftSide || isRightSide) {
             if (centerX < halfW) {
                 right = min(right, halfW)
             } else {

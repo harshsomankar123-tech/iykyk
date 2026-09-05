@@ -57,7 +57,7 @@ private data class FaceTracklet(
 }
 
 class IdentityClusteringEngine(
-    val maxCosineDistanceThreshold: Float = 0.52f, // 0.52 unites cross-scene appearances across different angles
+    val maxCosineDistanceThreshold: Float = 0.48f, // 0.48 calibrated for FaceNet embeddings
     val appearanceBreakGapMs: Long = 1200L
 ) {
 
@@ -160,10 +160,20 @@ class IdentityClusteringEngine(
 
         // Filter out fleeting noise and split-screen seam glitches (the seam phantom is already
         // removed at detection time, so this is a light secondary net):
-        // keep anyone who appears in multiple scenes (segments >= 2) OR for >= 3 frames.
+        //  - keep anyone who appears in multiple scenes (segments >= 2) OR for >= 3 frames, AND
+        //  - reject motion-blur phantoms: an identity that is blurry in EVERY frame (best sharpness
+        //    < 18) and never lingers (no continuous run of >= 3 frames) is a camera-transition smear,
+        //    not a real person. Sustained soft-focus people survive because they linger in one scene.
         val filtered = clusters.filter { cluster ->
             val segments = computeAppearanceSegments(cluster.detections)
-            segments.size >= 2 || cluster.detections.size >= 3
+            val appearsEnough = segments.size >= 2 || cluster.detections.size >= 3
+
+            // Spec: "Blurred whip-pan passes count for nobody. An appearance starts when a person's face becomes clearly visible"
+            // Any cluster whose best shot is blurry (bestSharpness < 25f) is a whip-pan motion artifact, not a real person.
+            val bestSharpness = cluster.detections.maxOfOrNull { it.sharpnessScore } ?: 0f
+            val isMotionBlurPhantom = bestSharpness < 25f
+
+            appearsEnough && !isMotionBlurPhantom
         }
         val result = if (filtered.isNotEmpty()) filtered else clusters
 

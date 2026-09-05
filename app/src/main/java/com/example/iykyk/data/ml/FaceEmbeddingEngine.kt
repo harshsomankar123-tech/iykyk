@@ -23,7 +23,7 @@ import kotlin.math.sqrt
  */
 class FaceEmbeddingEngine(
     private val context: Context,
-    private val modelAssetPath: String = "models/mobilefacenet.tflite"
+    private val modelAssetPath: String = "models/facenet.tflite"
 ) {
     private val TAG = "FaceEmbeddingEngine"
     private var interpreter: Interpreter? = null
@@ -42,7 +42,11 @@ class FaceEmbeddingEngine(
     private fun ensureInitialized() {
         if (initialized) return
         try {
-            val modelBuffer = loadModelFile(context, modelAssetPath)
+            var modelBuffer = loadModelFile(context, modelAssetPath)
+            if (modelBuffer == null && modelAssetPath != "models/mobilefacenet.tflite") {
+                Log.w(TAG, "Primary model $modelAssetPath not found, attempting fallback to models/mobilefacenet.tflite")
+                modelBuffer = loadModelFile(context, "models/mobilefacenet.tflite")
+            }
             if (modelBuffer == null) {
                 Log.e(TAG, "Failed to load model from assets/$modelAssetPath")
                 initialized = true
@@ -69,7 +73,7 @@ class FaceEmbeddingEngine(
             }
 
             interpreter = interp
-            Log.i(TAG, "MobileFaceNet loaded successfully: BatchSize=$batchSize, InputSize=${inputSize}x${inputSize}, EmbeddingDim=$embeddingDim")
+            Log.i(TAG, "Face recognition model ($modelAssetPath) loaded successfully: BatchSize=$batchSize, InputSize=${inputSize}x${inputSize}, EmbeddingDim=$embeddingDim")
         } catch (e: Exception) {
             Log.e(TAG, "Model init failed: ${e.message}", e)
             interpreter = null

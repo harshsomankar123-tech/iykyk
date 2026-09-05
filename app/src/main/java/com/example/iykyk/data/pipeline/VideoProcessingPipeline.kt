@@ -29,7 +29,7 @@ sealed class PipelineState {
 class VideoProcessingPipeline(
     private val context: Context,
     private val targetFps: Float = 5.0f, // 5 FPS (top of the 3–5 spec range): more frames = more chances to catch a face in a detectable pose
-    private val maxCosineDistance: Float = 0.52f, // 0.52 unites cross-scene appearances
+    private val maxCosineDistance: Float = 0.48f, // 0.48 calibrated for FaceNet embeddings
     private val appearanceBreakMs: Long = 1200L
 ) {
     private val TAG = "VideoPipeline"
@@ -96,8 +96,8 @@ class VideoProcessingPipeline(
 
                     // 2. For each detected face, extract crop & MobileFaceNet embedding immediately
                     for (detection in detections) {
-                        // Skip severe camera transition blur (< 5 sharpness)
-                        if (detection.sharpnessScore < 5f) {
+                        // Skip severe camera transition blur (< 12 sharpness)
+                        if (detection.sharpnessScore < 12f) {
                             continue
                         }
 
@@ -125,9 +125,17 @@ class VideoProcessingPipeline(
                         )
                         detection.portraitCrop = portraitBustCrop
                         val baseQuality = bestShotSelector.evaluateQualityScore(detection)
-                        // Generous bonus for solo frames so solo portraits are preferred over crowded multi-person shots
-                        if (detections.size == 1) {
-                            detection.qualityScore = (baseQuality + 0.25f).coerceIn(0f, 1f)
+                        // Spec: App usability, representative-shot quality
+                        // Strongly prioritize clean, centered solo shots over multi-person/split-screen scenes.
+                        // Every actor has solo appearances, so solo shots should ALWAYS be chosen as the representative profile.
+                        val halfW = frameBitmap.width / 2f
+                        val faceCenterX = detection.boundingBox.centerX()
+                        val isCenteredSolo = detections.size == 1 && Math.abs(faceCenterX - halfW) < frameBitmap.width * 0.25f
+
+                        if (isCenteredSolo) {
+                            detection.qualityScore = baseQuality + 10.0f
+                        } else {
+                            detection.qualityScore = baseQuality
                         }
 
                         allDetections.add(detection)
