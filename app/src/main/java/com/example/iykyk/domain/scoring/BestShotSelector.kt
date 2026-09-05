@@ -73,65 +73,56 @@ class BestShotSelector(
         faceBox: Rect,
         otherFaceBoxes: List<Rect> = emptyList(),
         targetAspectRatio: Float = 0.80f, // 4:5 portrait ratio
-        expansionRatio: Float = 0.20f     // 20% clean margin
+        expansionRatio: Float = 0.85f
     ): Bitmap {
         val fw = frameBitmap.width
         val fh = frameBitmap.height
+        val halfW = fw / 2
 
-        val faceW = max(1, faceBox.right - faceBox.left)
-        val faceH = max(1, faceBox.bottom - faceBox.top)
         val centerX = (faceBox.left + faceBox.right) / 2
         val centerY = (faceBox.top + faceBox.bottom) / 2
 
-        val baseDim = max(faceW, faceH) * (1.0f + expansionRatio)
+        // Determine if this is a split-screen tile (actor positioned on one half of the screen)
+        val isSplitScreen = otherFaceBoxes.size >= 2 || centerX < (fw * 0.40f) || centerX > (fw * 0.60f)
 
-        val cropHeight = baseDim / targetAspectRatio
-        val cropWidth = baseDim
+        val cropLeft: Int
+        val cropRight: Int
+        val cropTop: Int
+        val cropBottom: Int
 
-        // Shift center slightly downward for neck/hair balance
-        val adjustedCenterY = centerY + (faceH * 0.10f).toInt()
-
-        var left = (centerX - cropWidth / 2f).toInt()
-        var top = (adjustedCenterY - cropHeight / 2f).toInt()
-        var right = (centerX + cropWidth / 2f).toInt()
-        var bottom = (adjustedCenterY + cropHeight / 2f).toInt()
-
-        // Split-screen & multi-person seam constraint: if multiple faces are present OR a face is positioned on one side,
-        // never let its crop cross the center dividing line into the other side.
-        val halfW = fw / 2
-        val isOffCenterLeft = centerX < (fw * 0.42f)
-        val isOffCenterRight = centerX > (fw * 0.58f)
-
-        if (otherFaceBoxes.size >= 2 || isOffCenterLeft || isOffCenterRight) {
+        if (isSplitScreen) {
+            // Split-screen: use the complete natural half-frame tile!
             if (centerX < halfW) {
-                right = min(right, halfW)
+                cropLeft = 0
+                cropRight = halfW
             } else {
-                left = max(left, halfW)
+                cropLeft = halfW
+                cropRight = fw
             }
+            val tileW = cropRight - cropLeft
+            val desiredH = (tileW / targetAspectRatio).toInt().coerceAtMost(fh)
+
+            // Center vertically around the face with natural headroom above the hair
+            val targetCenterY = (centerY + (desiredH * 0.12f).toInt()).coerceIn(desiredH / 2, fh - desiredH / 2)
+            cropTop = (targetCenterY - desiredH / 2).coerceIn(0, fh - desiredH)
+            cropBottom = (cropTop + desiredH).coerceAtMost(fh)
+        } else {
+            // Solo shot: use full natural camera framing with upper body and headroom
+            val desiredW = fw
+            val desiredH = (desiredW / targetAspectRatio).toInt().coerceAtMost(fh)
+
+            cropLeft = 0
+            cropRight = fw
+
+            // Place face naturally in the upper half with full hair and shoulders
+            val targetCenterY = (centerY + (desiredH * 0.10f).toInt()).coerceIn(desiredH / 2, fh - desiredH / 2)
+            cropTop = (targetCenterY - desiredH / 2).coerceIn(0, fh - desiredH)
+            cropBottom = (cropTop + desiredH).coerceAtMost(fh)
         }
 
-        // Boundary constraint: never overlap into another person's face in multi-person scenes
-        for (other in otherFaceBoxes) {
-            if (other == faceBox) continue
-            val otherCenterX = (other.left + other.right) / 2
-            if (otherCenterX < centerX) {
-                val midX = (other.right + faceBox.left) / 2
-                left = max(left, midX)
-            } else if (otherCenterX > centerX) {
-                val midX = (faceBox.right + other.left) / 2
-                right = min(right, midX)
-            }
-        }
+        val finalW = max(1, cropRight - cropLeft)
+        val finalH = max(1, cropBottom - cropTop)
 
-        // Clamp to bitmap boundaries
-        left = left.coerceIn(0, fw - 1)
-        top = top.coerceIn(0, fh - 1)
-        right = right.coerceIn(left + 1, fw)
-        bottom = bottom.coerceIn(top + 1, fh)
-
-        val finalW = max(1, right - left)
-        val finalH = max(1, bottom - top)
-
-        return Bitmap.createBitmap(frameBitmap, left, top, finalW, finalH)
+        return Bitmap.createBitmap(frameBitmap, cropLeft, cropTop, finalW, finalH)
     }
 }

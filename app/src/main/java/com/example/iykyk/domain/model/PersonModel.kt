@@ -8,8 +8,8 @@ import android.graphics.Rect
  */
 enum class ProcessingStage(val title: String) {
     IDLE("Ready"),
-    EXTRACTING_FRAMES("Extracting Frames (3–5 FPS)"),
-    EXTRACTING_AND_DETECTING("Processing Video Frames (ML Kit + TFLite)"),
+    EXTRACTING_FRAMES("Extracting Frames"),
+    EXTRACTING_AND_DETECTING("Processing Video Frames"),
     CLUSTERING_IDENTITIES("Clustering Unique Identities"),
     SELECTING_BEST_SHOTS("Selecting Best Representative Shots"),
     COMPLETED("Collage Ready"),

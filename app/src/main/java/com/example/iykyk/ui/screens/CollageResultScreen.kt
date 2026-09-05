@@ -1,5 +1,6 @@
 package com.example.iykyk.ui.screens
 
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -8,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -82,7 +85,8 @@ fun CollageResultScreen(
     onUpdateTitle: (String) -> Unit,
     onToggleBadges: (Boolean) -> Unit,
     onSaveToGallery: ((Boolean) -> Unit) -> Unit,
-    onShareCollage: () -> Unit
+    onShareCollage: () -> Unit,
+    onSaveIndividualImage: (Bitmap, String, (Boolean) -> Unit) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     var isSaving by remember { mutableStateOf(false) }
@@ -385,16 +389,19 @@ fun CollageResultScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
                             .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        val portrait = person.bestShotCrop ?: person.bestShot.portraitCrop
+
                         // Top Bar in Modal
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = person.displayName,
                                     fontSize = 20.sp,
@@ -407,26 +414,52 @@ fun CollageResultScreen(
                                     color = TextSecondary
                                 )
                             }
-                            IconButton(
-                                onClick = { selectedPersonForPreview = null },
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(ElevatedSurface)
-                                    .size(36.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = PureWhite,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                if (portrait != null) {
+                                    IconButton(
+                                        onClick = {
+                                            onSaveIndividualImage(portrait, person.displayName) { success ->
+                                                val msg = if (success) "Saved ${person.displayName} photo to Pictures/IYKYK" else "Failed to save photo"
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(ElevatedSurface)
+                                            .size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Download,
+                                            contentDescription = "Download ${person.displayName}",
+                                            tint = PureWhite,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { selectedPersonForPreview = null },
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(ElevatedSurface)
+                                        .size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = PureWhite,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
                         // Large Full Portrait Photo
-                        val portrait = person.bestShotCrop ?: person.bestShot.portraitCrop
                         if (portrait != null) {
                             Image(
                                 bitmap = portrait.asImageBitmap(),
@@ -437,6 +470,40 @@ fun CollageResultScreen(
                                     .clip(RoundedCornerShape(16.dp)),
                                 contentScale = ContentScale.Crop
                             )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Download Photo Action Button
+                            Button(
+                                onClick = {
+                                    onSaveIndividualImage(portrait, person.displayName) { success ->
+                                        val msg = if (success) "Saved ${person.displayName} photo to Pictures/IYKYK" else "Failed to save photo"
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = PureWhite,
+                                    contentColor = PureBlack
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = null,
+                                    tint = PureBlack,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Download Photo",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = PureBlack
+                                )
+                            }
                         } else {
                             Box(
                                 modifier = Modifier

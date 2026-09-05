@@ -158,6 +158,15 @@ class CollageViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun saveIndividualImage(bitmap: Bitmap, personName: String, onComplete: (Boolean) -> Unit) {
+        val cleanName = personName.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+        val filename = "IYKYK_${cleanName}_${System.currentTimeMillis()}.png"
+        viewModelScope.launch {
+            val uri = exportManager.saveToGallery(bitmap, filename)
+            onComplete(uri != null)
+        }
+    }
+
     fun shareCollage() {
         val currentPersons = _uiState.value.persons
         if (currentPersons.isEmpty()) return

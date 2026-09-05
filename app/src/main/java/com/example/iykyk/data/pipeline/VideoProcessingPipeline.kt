@@ -121,7 +121,7 @@ class VideoProcessingPipeline(
                             detection.boundingBox,
                             otherFaceBoxes = allOtherBoxes,
                             targetAspectRatio = 0.80f,
-                            expansionRatio = 0.20f
+                            expansionRatio = 0.85f
                         )
                         detection.portraitCrop = portraitBustCrop
                         val baseQuality = bestShotSelector.evaluateQualityScore(detection)

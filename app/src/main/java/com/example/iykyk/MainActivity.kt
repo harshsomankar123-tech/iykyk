@@ -83,6 +83,9 @@ fun AppNavigation(viewModel: CollageViewModel) {
                 },
                 onShareCollage = {
                     viewModel.shareCollage()
+                },
+                onSaveIndividualImage = { bmp, name, callback ->
+                    viewModel.saveIndividualImage(bmp, name, callback)
                 }
             )
         }
