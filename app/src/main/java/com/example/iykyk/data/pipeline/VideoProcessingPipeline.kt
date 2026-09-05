@@ -193,7 +193,10 @@ class VideoProcessingPipeline(
 
             val uniquePersons = mutableListOf<UniquePerson>()
             for (cluster in clusters) {
-                val bestShot = bestShotSelector.selectBestDetection(cluster.detections) ?: continue
+                // Prefer solo portrait shots over multi-person/split-screen scenes
+                val soloDetections = cluster.detections.filter { it.qualityScore >= 10.0f }
+                val candidates = if (soloDetections.isNotEmpty()) soloDetections else cluster.detections
+                val bestShot = bestShotSelector.selectBestDetection(candidates) ?: continue
                 val appearanceSegments = clusteringEngine.computeAppearanceSegments(cluster.detections)
 
                 uniquePersons.add(

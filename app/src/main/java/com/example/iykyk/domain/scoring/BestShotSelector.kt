@@ -96,12 +96,13 @@ class BestShotSelector(
         var right = (centerX + cropWidth / 2f).toInt()
         var bottom = (adjustedCenterY + cropHeight / 2f).toInt()
 
-        // Split-screen seam constraint: if a face is on one side of the screen, never let the crop cross the center line
+        // Split-screen & multi-person seam constraint: if multiple faces are present OR a face is positioned on one side,
+        // never let its crop cross the center dividing line into the other side.
         val halfW = fw / 2
-        val isLeftSide = faceBox.right < halfW + (fw * 0.05f) && centerX < halfW
-        val isRightSide = faceBox.left > halfW - (fw * 0.05f) && centerX > halfW
+        val isOffCenterLeft = centerX < (fw * 0.42f)
+        val isOffCenterRight = centerX > (fw * 0.58f)
 
-        if (otherFaceBoxes.size >= 2 || isLeftSide || isRightSide) {
+        if (otherFaceBoxes.size >= 2 || isOffCenterLeft || isOffCenterRight) {
             if (centerX < halfW) {
                 right = min(right, halfW)
             } else {
